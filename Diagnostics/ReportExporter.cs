@@ -26,7 +26,7 @@ namespace VanillaProfiler.Diagnostics
                 string fileName = $"CSII_Report_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt";
                 string path = Path.Combine(dir, fileName);
 
-                File.WriteAllText(path, BuildReport(), Encoding.UTF8);
+                AtomicFileWriter.WriteAllText(path, BuildReport(), Encoding.UTF8);
                 ModLog.Info($"Performance report saved: {path}");
                 return path;
             }

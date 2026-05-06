@@ -68,6 +68,7 @@ namespace VanillaProfiler
                     s_Cache[type] = info;
                 }
                 if (info.Skip) return;
+                if (info.IsVanilla && !SettingsStore.Current.ProfileVanillaSystems) return;
 
                 ProfilerHost.TryGet()?.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
             }

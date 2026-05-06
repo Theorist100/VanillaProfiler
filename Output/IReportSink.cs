@@ -5,6 +5,7 @@ namespace VanillaProfiler.Output
 {
     public enum SystemLogLevel
     {
+        Unknown = 0,
         Info,
         Warn,
         Error,

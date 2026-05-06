@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using VanillaProfiler.Diagnostics;
 
@@ -194,7 +195,8 @@ namespace VanillaProfiler.Overlay
             HealthLevel.Good => SUCCESS,
             HealthLevel.Ok => WARNING,
             HealthLevel.Poor => ERROR_RED,
-            _ => TEXT_PRIMARY,
+            HealthLevel.Unknown => TEXT_PRIMARY,
+            _ => throw new ArgumentOutOfRangeException(nameof(level), level, "Unhandled HealthLevel"),
         };
 
         private static Texture2D MakeTex(Color color)

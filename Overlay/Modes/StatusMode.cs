@@ -1,3 +1,4 @@
+using System;
 using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Overlay.Modes
@@ -50,7 +51,8 @@ namespace VanillaProfiler.Overlay.Modes
                 HealthLevel.Good => "Good",
                 HealthLevel.Ok => "Warning",
                 HealthLevel.Poor => "Problem",
-                _ => "Unknown",
+                HealthLevel.Unknown => "Unknown",
+                _ => throw new ArgumentOutOfRangeException(nameof(level), level, "Unhandled HealthLevel"),
             };
         }
 
@@ -68,7 +70,8 @@ namespace VanillaProfiler.Overlay.Modes
                 BottleneckKind.SimBound => "simulation",
                 BottleneckKind.MemoryBound => "managed memory growth",
                 BottleneckKind.Balanced => null,
-                _ => null,
+                BottleneckKind.Unknown => null,
+                _ => throw new ArgumentOutOfRangeException(nameof(health), health.Bottleneck, "Unhandled BottleneckKind"),
             };
             if (fromBottleneck != null) return fromBottleneck;
 
@@ -96,7 +99,8 @@ namespace VanillaProfiler.Overlay.Modes
                 HealthLevel.Good => "stable",
                 HealthLevel.Ok => "growing",
                 HealthLevel.Poor => "rising fast",
-                _ => "unknown",
+                HealthLevel.Unknown => "unknown",
+                _ => throw new ArgumentOutOfRangeException(nameof(health), "Unhandled HealthLevel"),
             };
         }
 

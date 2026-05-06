@@ -1,3 +1,4 @@
+using System;
 using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Overlay.Modes
@@ -63,7 +64,8 @@ namespace VanillaProfiler.Overlay.Modes
                 BottleneckKind.SimBound => "simulation is overloaded",
                 BottleneckKind.MemoryBound => "managed memory is growing fast",
                 BottleneckKind.Balanced => "performance is unstable",
-                _ => "performance is unstable",
+                BottleneckKind.Unknown => "performance is unstable",
+                _ => throw new ArgumentOutOfRangeException(nameof(health), health.Bottleneck, "Unhandled BottleneckKind"),
             };
         }
 

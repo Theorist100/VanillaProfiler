@@ -4,6 +4,7 @@ namespace VanillaProfiler.Diagnostics
 {
     public enum HealthLevel
     {
+        Unknown = 0,
         Good,
         Ok,
         Poor,
@@ -11,6 +12,7 @@ namespace VanillaProfiler.Diagnostics
 
     public enum BottleneckKind
     {
+        Unknown = 0,
         Balanced,
         RenderBound,
         SimBound,

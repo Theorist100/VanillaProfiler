@@ -42,7 +42,8 @@ namespace VanillaProfiler.Output
                 SystemLogLevel.Info => "[INFO]",
                 SystemLogLevel.Warn => "[WARN]",
                 SystemLogLevel.Error => "[ERROR]",
-                _ => "[INFO]",
+                SystemLogLevel.Unknown => "[INFO]",
+                _ => throw new ArgumentOutOfRangeException(nameof(level), level, "Unhandled SystemLogLevel"),
             };
             WriteLine(Inv($"{DateTime.Now:HH:mm:ss} {tag} {message}"));
         }

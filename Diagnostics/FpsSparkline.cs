@@ -18,6 +18,12 @@ namespace VanillaProfiler.Diagnostics
         private float m_AccumSeconds;
         private int m_AccumFrames;
 
+        // Render cache: sparkline string changes only on Push (≤ 1 Hz), so OnGUI
+        // can call Render every frame without allocating.
+        private string m_CachedRender;
+        private int m_CachedWidth;
+        private int m_CachedSampleCount;
+
         /// <summary>Feed a per-frame delta. Sampler buckets up to 1 second internally.</summary>
         public void OnFrame(double frameMs, float deltaSeconds)
         {
@@ -44,6 +50,14 @@ namespace VanillaProfiler.Diagnostics
             m_Samples.Clear();
             m_AccumSeconds = 0;
             m_AccumFrames = 0;
+            InvalidateCache();
+        }
+
+        private void InvalidateCache()
+        {
+            m_CachedRender = null;
+            m_CachedWidth = 0;
+            m_CachedSampleCount = 0;
         }
 
         public int Count => m_Samples.Count;
@@ -52,6 +66,11 @@ namespace VanillaProfiler.Diagnostics
         public string Render(int width = CAPACITY)
         {
             if (m_Samples.Count == 0) return string.Empty;
+            if (m_CachedRender != null
+                && m_CachedWidth == width
+                && m_CachedSampleCount == m_Samples.Count)
+                return m_CachedRender;
+
             int n = m_Samples.Count;
             int take = n < width ? n : width;
             int skip = n - take;
@@ -72,12 +91,15 @@ namespace VanillaProfiler.Diagnostics
                 double norm = range > 0 ? (m_Samples[i] - min) / range : 0;
                 int idx = rawRange < 0.001
                     ? BLOCKS.Length / 2
-                    : (int)(norm * (BLOCKS.Length - 1));
+                    : (int)System.Math.Round(norm * (BLOCKS.Length - 1));
                 if (idx < 0) idx = 0;
                 if (idx >= BLOCKS.Length) idx = BLOCKS.Length - 1;
                 sb.Append(BLOCKS[idx]);
             }
-            return sb.ToString();
+            m_CachedRender = sb.ToString();
+            m_CachedWidth = width;
+            m_CachedSampleCount = m_Samples.Count;
+            return m_CachedRender;
         }
 
         private void Push(double fps)
@@ -85,6 +107,7 @@ namespace VanillaProfiler.Diagnostics
             if (m_Samples.Count >= CAPACITY)
                 m_Samples.RemoveAt(0);
             m_Samples.Add(fps);
+            InvalidateCache();
         }
     }
 }

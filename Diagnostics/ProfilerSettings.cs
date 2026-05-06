@@ -29,6 +29,11 @@ namespace VanillaProfiler.Diagnostics
 
         public bool SettingsPanelHotkey = true;
 
+        // Profile every vanilla SystemBase.Update via Harmony patch. Off by default
+        // because patching ~300 vanilla systems adds measurable overhead; mod systems
+        // are always profiled. Toggle when you specifically need vanilla breakdown.
+        public bool ProfileVanillaSystems = false;
+
         // UI scaling. 0 = auto from screen height, otherwise explicit multiplier
         // (typical values 1.0/1.5/2.0). Clamped to [0.75, 3.0] on load.
         public float UiScale = 0f;

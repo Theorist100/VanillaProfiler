@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEngine;
+using VanillaProfiler.Output;
 
 namespace VanillaProfiler.Diagnostics
 {
@@ -10,10 +11,17 @@ namespace VanillaProfiler.Diagnostics
     /// </summary>
     public static class SettingsStore
     {
+        private const string SETTINGS_DIR = "VanillaProfiler";
+        private const string SETTINGS_FILE = "settings.json";
+
+        // Defensive cap for ReadAllText — settings.json is normally a few KB; anything
+        // close to this means the file was corrupted or replaced by a malicious payload.
+        private const long MAX_SETTINGS_BYTES = 256 * 1024;
+
         public static ProfilerSettings Current { get; private set; } = new();
 
         public static string FilePath =>
-            Path.Combine(Application.persistentDataPath, "VanillaProfiler", "settings.json");
+            Path.Combine(Application.persistentDataPath, SETTINGS_DIR, SETTINGS_FILE);
 
         public static void Load()
         {
@@ -69,7 +77,16 @@ namespace VanillaProfiler.Diagnostics
         {
             try
             {
-                string json = File.ReadAllText(path);
+                long size = new FileInfo(path).Length;
+                if (size > MAX_SETTINGS_BYTES)
+                    throw new InvalidDataException(
+                        $"Settings JSON exceeds {MAX_SETTINGS_BYTES} bytes ({size}); refusing to load");
+
+                string json;
+                using (var reader = new StreamReader(path))
+                {
+                    json = reader.ReadToEnd();
+                }
                 if (string.IsNullOrWhiteSpace(json))
                     throw new InvalidDataException("Empty settings JSON");
 
@@ -92,7 +109,6 @@ namespace VanillaProfiler.Diagnostics
         private static void SaveCore()
         {
             string path = FilePath;
-            string tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             string backup = path + ".bak";
             try
             {
@@ -101,27 +117,17 @@ namespace VanillaProfiler.Diagnostics
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                TryDelete(path + ".tmp");
-                File.WriteAllText(tmp, JsonUtility.ToJson(Current, prettyPrint: true));
-                if (File.Exists(path))
-                    File.Replace(tmp, path, backup);
-                else
-                    File.Move(tmp, path);
+                AtomicFileWriter.WriteAllText(
+                    path,
+                    JsonUtility.ToJson(Current, prettyPrint: true),
+                    encoding: null,
+                    backupPath: backup);
             }
             catch (Exception ex)
             {
                 ModLog.Warn($"Settings save failed: {ex}");
-                TryDelete(tmp);
             }
         }
 
-        private static void TryDelete(string path)
-        {
-            try { File.Delete(path); }
-            catch
-            {
-                // Best effort cleanup; a stale backup must not block settings saves.
-            }
-        }
     }
 }
