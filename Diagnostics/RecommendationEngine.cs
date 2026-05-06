@@ -20,23 +20,36 @@ namespace VanillaProfiler.Diagnostics
             var list = new List<Recommendation>(MAX_RECOMMENDATIONS);
             if (health == null || snap == null) return list;
 
+            // Lazy probe — first time the player opens the Tips screen, read what's
+            // currently set so we don't suggest fixes the player has already applied.
+            GraphicsSettingsProbe.EnsureProbed();
+            var probed = GraphicsSettingsProbe.State;
+
             // Critical-tier — fired only when multiple signals confirm the symptom.
             if (health.Bottleneck == BottleneckKind.RenderBound && health.RenderSeverity == RenderBoundSeverity.Severe)
             {
-                list.Add(new Recommendation
+                if (probed.MaxFrameLatency.HasValue && probed.MaxFrameLatency.Value < 3)
                 {
-                    Level = RecommendationLevel.Critical,
-                    Title = "NVIDIA: Max Pre-rendered Frames = 3",
-                    Action = "NVIDIA Control Panel -> 3D Settings -> Cities2.exe",
-                    Reason = "GPU is likely waiting on the CPU each frame.",
-                });
-                list.Add(new Recommendation
+                    list.Add(new Recommendation
+                    {
+                        Level = RecommendationLevel.Critical,
+                        Title = "Raise Max Frame Latency to 3",
+                        Action = "Settings -> Graphics -> Max Frame Latency = 3",
+                        Reason = health.GpuUnderutilized
+                            ? $"GPU sits at {health.GpuBoundPercent:F0}% — CPU render is the gate."
+                            : $"Currently {probed.MaxFrameLatency.Value} — locks GPU to CPU each frame.",
+                    });
+                }
+                if (probed.VolumetricsEnabled != false)
                 {
-                    Level = RecommendationLevel.Critical,
-                    Title = "Disable Volumetrics",
-                    Action = "Settings -> Graphics -> Volumetrics = Off",
-                    Reason = "Heaviest single GPU/CPU render cost.",
-                });
+                    list.Add(new Recommendation
+                    {
+                        Level = RecommendationLevel.Critical,
+                        Title = "Disable Volumetrics",
+                        Action = "Settings -> Graphics -> Volumetrics = Off",
+                        Reason = "Heaviest single GPU/CPU render cost.",
+                    });
+                }
             }
 
             // Memory pressure trumps render advice — restart helps cleanly.
@@ -56,27 +69,39 @@ namespace VanillaProfiler.Diagnostics
             bool renderHint = health.Bottleneck == BottleneckKind.RenderBound;
             if (perfTrouble || renderHint)
             {
-                list.Add(new Recommendation
+                // LOD: skip the suggestion if the player is already at or below 0.75.
+                if (!probed.LevelOfDetail.HasValue || probed.LevelOfDetail.Value > 0.75f)
                 {
-                    Level = RecommendationLevel.Suggested,
-                    Title = "Lower Level of Detail to 0.75",
-                    Action = "Settings -> Graphics -> Level of Detail = 0.75",
-                    Reason = "Single most impactful CS2 setting per Paradox.",
-                });
-                list.Add(new Recommendation
+                    list.Add(new Recommendation
+                    {
+                        Level = RecommendationLevel.Suggested,
+                        Title = "Lower Level of Detail to 0.75",
+                        Action = "Settings -> Graphics -> Level of Detail = 0.75",
+                        Reason = probed.LevelOfDetail.HasValue
+                            ? $"Currently {probed.LevelOfDetail.Value:F2} — single most impactful CS2 setting."
+                            : "Single most impactful CS2 setting per Paradox.",
+                    });
+                }
+                if (probed.DepthOfFieldEnabled != false)
                 {
-                    Level = RecommendationLevel.Suggested,
-                    Title = "Disable Depth of Field",
-                    Action = "Settings -> Graphics -> Depth of Field = Off",
-                    Reason = "Sharper image and a measurable FPS gain.",
-                });
-                list.Add(new Recommendation
+                    list.Add(new Recommendation
+                    {
+                        Level = RecommendationLevel.Suggested,
+                        Title = "Disable Depth of Field",
+                        Action = "Settings -> Graphics -> Depth of Field = Off",
+                        Reason = "Sharper image and a measurable FPS gain.",
+                    });
+                }
+                if (probed.MotionBlurEnabled != false)
                 {
-                    Level = RecommendationLevel.Suggested,
-                    Title = "Disable Motion Blur",
-                    Action = "Settings -> Graphics -> Motion Blur = Off",
-                    Reason = "Hides stutter at low FPS, no benefit at high FPS.",
-                });
+                    list.Add(new Recommendation
+                    {
+                        Level = RecommendationLevel.Suggested,
+                        Title = "Disable Motion Blur",
+                        Action = "Settings -> Graphics -> Motion Blur = Off",
+                        Reason = "Hides stutter at low FPS, no benefit at high FPS.",
+                    });
+                }
             }
 
             // Mod isolation hint — only when a mod actually stands out by CPU.
@@ -95,7 +120,7 @@ namespace VanillaProfiler.Diagnostics
             }
 
             // Info-tier — universally helpful safety nets, always last.
-            if (list.Count < MAX_RECOMMENDATIONS)
+            if (list.Count < MAX_RECOMMENDATIONS && probed.IsFullscreenWindowed != true)
             {
                 list.Add(new Recommendation
                 {
@@ -124,6 +149,9 @@ namespace VanillaProfiler.Diagnostics
 
         private const double HEAVY_MOD_MS = 30.0;
         private const string PROFILER_MOD_NAME = "VanillaProfiler";
+
+        private static string ProbedReason(bool probedKnown, string knownText, string fallbackText)
+            => probedKnown ? knownText : fallbackText;
 
         private static (string ModName, double TotalMs)? HeaviestNonProfilerMod(OverlaySnapshot snap)
         {

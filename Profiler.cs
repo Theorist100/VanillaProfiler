@@ -70,6 +70,7 @@ namespace VanillaProfiler
             m_Disposed = true;
             foreach (var sink in m_Sinks) sink.Shutdown();
             ResetSessionState();
+            m_Memory.Dispose();
         }
 
         public void ResetSession()

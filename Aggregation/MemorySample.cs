@@ -8,12 +8,27 @@ namespace VanillaProfiler.Aggregation
         public long NativeAllocBytes;
         public long NativeReservedBytes;
 
+        // Extra categories from Unity's ProfilerRecorder (ProfilerCategory.Memory).
+        // Zero when the recorder is unavailable on a given platform/build.
+        public long GfxUsedBytes;
+        public long AudioUsedBytes;
+        public long VideoUsedBytes;
+        public long SystemUsedBytes;
+
         public long ManagedDelta;
         public long MonoHeapDelta;
         public long NativeAllocDelta;
         public long NativeReservedDelta;
+        public long GfxUsedDelta;
+        public long AudioUsedDelta;
+        public long VideoUsedDelta;
 
         public double ManagedGrowthMBperSec;
         public bool BaselineJustCaptured;
+
+        // Per-frame averages from ProfilerCategory.Render (nanoseconds, raw).
+        public long MainThreadCpuNs;
+        public long RenderThreadCpuNs;
+        public long GpuFrameTimeNs;
     }
 }

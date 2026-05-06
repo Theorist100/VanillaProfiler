@@ -146,6 +146,14 @@ namespace VanillaProfiler.Output
                 WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB"));
                 WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB"));
                 WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB"));
+                if (mem.GfxUsedBytes > 0)
+                    WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                if (mem.AudioUsedBytes > 0)
+                    WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                if (mem.VideoUsedBytes > 0)
+                    WriteLine(Inv($"  Video:            {mem.VideoUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                if (mem.SystemUsedBytes > 0)
+                    WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
                 return;
             }
 
@@ -156,6 +164,16 @@ namespace VanillaProfiler.Output
             WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.MonoHeapDelta)})"));
             WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeAllocDelta)})"));
             WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeReservedDelta)})"));
+            if (mem.GfxUsedBytes > 0)
+                WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.GfxUsedDelta)})"));
+            if (mem.AudioUsedBytes > 0)
+                WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.AudioUsedDelta)})"));
+            if (mem.VideoUsedBytes > 0)
+                WriteLine(Inv($"  Video:            {mem.VideoUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.VideoUsedDelta)})"));
+            if (mem.SystemUsedBytes > 0)
+                WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.MainThreadCpuNs > 0 || mem.RenderThreadCpuNs > 0)
+                WriteLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
         }
 
         private void WriteHealthSummary(HealthReport h)

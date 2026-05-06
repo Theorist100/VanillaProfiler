@@ -26,5 +26,14 @@ namespace VanillaProfiler
         // for themselves that the profiler isn't the bottleneck.
         public double ProfilerSelfMs;
         public double ProfilerSelfPercent;
+
+        // Extra memory + CPU categories sourced from Unity's ProfilerRecorder
+        // (Gfx/Audio used; main + render thread frame time). 0 when the platform
+        // doesn't expose the marker — caller should branch on > 0 to render.
+        public double GfxUsedMB;
+        public double AudioUsedMB;
+        public double MainThreadCpuMs;
+        public double RenderThreadCpuMs;
+        public double GpuFrameTimeMs;
     }
 }

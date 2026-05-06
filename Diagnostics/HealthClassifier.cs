@@ -55,6 +55,12 @@ namespace VanillaProfiler.Diagnostics
         // "vanilla-render-system in top"). Exposed for the support file so triagers
         // see the breakdown, not just the verdict.
         public int RenderSignalScore;
+
+        // Direct CPU/GPU bound classification when ProfilerRecorder data is present.
+        // GpuBoundPercent ≈ how much of the frame the GPU is the gating thread.
+        // 0 when no GPU data is available (RenderBound score still works without).
+        public double GpuBoundPercent;
+        public bool GpuUnderutilized;     // CPU render >> GPU → classic pre-rendered frames symptom
     }
 
     public static class HealthClassifier
@@ -92,18 +98,43 @@ namespace VanillaProfiler.Diagnostics
             report.MemoryHint = BuildMemoryHint(mem);
             report.RenderPhaseMs = renderPhaseMs;
             report.SimPhaseMs = simPhaseMs;
+
+            // GPU vs CPU bound — only meaningful when ProfilerRecorder gave us
+            // GPU + CPU thread numbers. Otherwise the legacy phase-only path runs.
+            ClassifyThreadBalance(snap, report);
+
             (report.Bottleneck, report.BottleneckHint) = ClassifyBottleneck(
-                snap.AvgFrameMs, simPhaseMs, renderPhaseMs, snap.ManagedGrowthMBperSec);
+                snap.AvgFrameMs, simPhaseMs, renderPhaseMs, snap.ManagedGrowthMBperSec, report);
 
             if (report.Bottleneck == BottleneckKind.RenderBound)
             {
-                int score = ScoreRenderBoundSignals(snap, simPhaseMs, renderPhaseMs);
+                int score = ScoreRenderBoundSignals(snap, simPhaseMs, renderPhaseMs, report);
                 report.RenderSignalScore = score;
                 if (score >= RENDER_SEVERE_SCORE) report.RenderSeverity = RenderBoundSeverity.Severe;
                 else if (score >= RENDER_MILD_SCORE) report.RenderSeverity = RenderBoundSeverity.Mild;
             }
 
             return report;
+        }
+
+        // The frame is gated by whichever thread (CPU main / CPU render / GPU) takes
+        // the longest. GPU underutilization fires when CPU render dwarfs GPU — that's
+        // the literal pre-rendered-frames-=-1 signature.
+        private const double THREAD_GAP_MS = 5.0;
+
+        private static void ClassifyThreadBalance(OverlaySnapshot snap, HealthReport report)
+        {
+            double gpu = snap.GpuFrameTimeMs;
+            double cpuMain = snap.MainThreadCpuMs;
+            double cpuRender = snap.RenderThreadCpuMs;
+            double frameMs = snap.AvgFrameMs;
+            if (gpu <= 0 || frameMs <= 0) return;
+
+            report.GpuBoundPercent = Math.Min(100.0, gpu / frameMs * 100.0);
+
+            // Underutilization: CPU render thread is doing more work than the GPU
+            // takes to consume it, with a meaningful gap. Strong driver-bound signal.
+            report.GpuUnderutilized = cpuRender > gpu + THREAD_GAP_MS && cpuMain >= gpu;
         }
 
         // Multi-signal score for "this looks like a CPU-side rendering bottleneck".
@@ -118,7 +149,7 @@ namespace VanillaProfiler.Diagnostics
         private const int RENDER_SEVERE_SCORE = 3;
         private const int RENDER_MILD_SCORE = 2;
 
-        private static int ScoreRenderBoundSignals(OverlaySnapshot snap, double simMs, double renderMs)
+        private static int ScoreRenderBoundSignals(OverlaySnapshot snap, double simMs, double renderMs, HealthReport report)
         {
             int score = 0;
             double frameMs = snap.AvgFrameMs;
@@ -143,6 +174,11 @@ namespace VanillaProfiler.Diagnostics
             // 5) Top vanilla system is render-side (BatchInstanceSystem etc.) and
             //    consuming meaningful time — this is engine rendering, not a mod.
             if (HasRenderHeavyVanillaTop(snap)) score += 1;
+
+            // 6) Direct GPU underutilization signal (only when ProfilerRecorder gave
+            //    us the GPU number). This is the gold-standard pre-rendered-frames
+            //    detector and worth two points on its own.
+            if (report.GpuUnderutilized) score += 2;
 
             return score;
         }
@@ -228,7 +264,7 @@ namespace VanillaProfiler.Diagnostics
         private const double MEMORY_BOUND_MB_PER_S = 10.0;
 
         private static (BottleneckKind, string) ClassifyBottleneck(
-            double frameMs, double simMs, double renderMs, double managedGrowthMBperSec)
+            double frameMs, double simMs, double renderMs, double managedGrowthMBperSec, HealthReport report)
         {
             if (Math.Max(0, managedGrowthMBperSec) > MEMORY_BOUND_MB_PER_S)
                 return (BottleneckKind.MemoryBound, "Managed memory growing fast — restart recommended");
@@ -236,6 +272,25 @@ namespace VanillaProfiler.Diagnostics
             if (frameMs <= 0)
                 return (BottleneckKind.Balanced, "Collecting data...");
 
+            // Direct path: ProfilerRecorder gave us GPU + CPU thread numbers, so
+            // we can name the actual gating thread instead of guessing from phases.
+            if (report.GpuBoundPercent > 0)
+            {
+                if (report.GpuUnderutilized)
+                    return (BottleneckKind.RenderBound,
+                        $"CPU render is gating GPU ({report.GpuBoundPercent:F0}% GPU bound) — driver-side stall");
+
+                if (report.GpuBoundPercent > 70)
+                    return (BottleneckKind.RenderBound,
+                        $"GPU bound {report.GpuBoundPercent:F0}% — lower graphics quality");
+
+                if (simMs > frameMs * BOTTLENECK_FRAME_SHARE)
+                    return (BottleneckKind.SimBound, "Simulation heavy — large city or heavy mod");
+
+                return (BottleneckKind.Balanced, "Frame budget balanced");
+            }
+
+            // Legacy path: only phase data available. Same logic as before.
             double simShare = simMs / frameMs;
             double renderShare = renderMs / frameMs;
 

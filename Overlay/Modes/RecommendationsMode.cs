@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using VanillaProfiler.Diagnostics;
 
@@ -15,12 +16,22 @@ namespace VanillaProfiler.Overlay.Modes
 
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
-            // Worst case: header (2) + section (1) + 6 entries (3 lines each = 18) +
-            // padding spacers between entries (5). Capped so the panel never grows
-            // past two screens — RecommendationEngine itself caps at 6 entries.
-            int lines = 2 + 1 + (6 * 3) + 5;
+            // Header (2) + section (1) + N entries × 3 lines + (N-1) spacers between.
+            // RecommendationEngine.Build is a pure function whose result is fully
+            // determined by the cached probe + snapshot, so calling it twice (here
+            // and in Draw) returns the same list with no extra side effects.
+            var picks = RecommendationEngine.Build(LastHealth(snapshot), snapshot);
+            int lines = picks.Count == 0
+                ? 2 + 1 + 1               // header + ALL CLEAR + body
+                : 2 + 1 + (picks.Count * 3) + Math.Max(0, picks.Count - 1);
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
+
+        // The mode contract gives Draw both snapshot + health but MeasureHeight only
+        // gets the snapshot. Health is recomputed each report cycle and exposed via
+        // ProfilerHost; reading it here keeps the height in sync with what Draw uses.
+        private static HealthReport LastHealth(OverlaySnapshot snapshot)
+            => ProfilerHost.TryGet()?.LastHealth;
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {

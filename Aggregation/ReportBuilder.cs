@@ -59,6 +59,11 @@ namespace VanillaProfiler.Aggregation
                 ManagedDeltaMB = mem.ManagedDelta / BYTES_PER_MB,
                 ProfilerSelfMs = profilerMs,
                 ProfilerSelfPercent = profilerPct,
+                GfxUsedMB = mem.GfxUsedBytes / BYTES_PER_MB,
+                AudioUsedMB = mem.AudioUsedBytes / BYTES_PER_MB,
+                MainThreadCpuMs = mem.MainThreadCpuNs / 1_000_000.0,
+                RenderThreadCpuMs = mem.RenderThreadCpuNs / 1_000_000.0,
+                GpuFrameTimeMs = mem.GpuFrameTimeNs / 1_000_000.0,
             };
         }
 
