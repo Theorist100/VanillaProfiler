@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- CS2 Modding Toolchain -->
+    <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
+
+    <PropertyGroup>
+        <Title>Vanilla Profiler</Title>
+        <Version>1.0.0</Version>
+        <Description>Lightweight in-game profiler for diagnosing FPS drops, stutters, and mod conflicts.</Description>
+        <Authors>Beltorn</Authors>
+        <TreatWarningsAsErrors>False</TreatWarningsAsErrors>
+        <Nullable>disable</Nullable>
+        <!--
+            Microsoft NetAnalyzer suppressions with rationale:
+              CS8632 — nullable reference annotations are off project-wide
+              CA1001 — IMod lifecycle is owned by the game; OnDispose disposes m_Profiler
+              CA1002 — generic List<T> in public API is the intended profiler/exporter shape
+              CA1031 — broad catch in Harmony patches is the documented contract (never crash)
+              CA1034 — nested types are intentional (MainPanelButtons.Actions, SettingsPanel.State)
+              CA1051 — JsonUtility-serialized DTOs need public fields, not properties
+              CA1062 — main-thread internal API; null checks at every entry are noise
+              CA1305 — log/report formatting uses InvariantCulture where it matters; rest is human text
+              CA1707 — m_ prefix is project convention for private mutable fields
+              CA1805 — explicit default initialization is intentional documentation in DTOs
+              CA1822 — instance methods kept on Profiler/Overlay for symmetry; static-marking churn
+              CA1859 — IEnumerable return on TailPerfLog keeps the caller from materialising the array
+        -->
+        <NoWarn>$(NoWarn);CS8632;CA1001;CA1002;CA1031;CA1034;CA1051;CA1062;CA1305;CA1707;CA1805;CA1822;CA1859</NoWarn>
+        <EnableNETAnalyzers>true</EnableNETAnalyzers>
+        <AnalysisLevel>latest-All</AnalysisLevel>
+        <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
+    </PropertyGroup>
+
+    <!-- Game References -->
+    <ItemGroup>
+        <Reference Include="Game">
+            <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Game.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Unity.Entities">
+            <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Unity.Entities.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Unity.Collections">
+            <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II\Cities2_Data\Managed\Unity.Collections.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Colossal.Core"><Private>false</Private></Reference>
+        <Reference Include="Colossal.Logging"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.CoreModule"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.IMGUIModule"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.InputLegacyModule"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.TextRenderingModule"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.ScreenCaptureModule"><Private>false</Private></Reference>
+        <Reference Include="UnityEngine.JSONSerializeModule"><Private>false</Private></Reference>
+    </ItemGroup>
+
+    <!-- Harmony -->
+    <ItemGroup>
+        <PackageReference Include="Lib.Harmony" Version="2.2.2" />
+    </ItemGroup>
+
+
+    <ItemGroup>
+        <Reference Update="System"><Private>false</Private></Reference>
+        <Reference Update="System.Core"><Private>false</Private></Reference>
+    </ItemGroup>
+
+    <!-- CS2 Modding Toolchain targets -->
+    <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+
+    <!-- Paths -->
+    <PropertyGroup>
+        <CSII_UserDataPath>$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II</CSII_UserDataPath>
+        <ModsFolder>$(CSII_UserDataPath)\Mods\VanillaProfiler</ModsFolder>
+    </PropertyGroup>
+
+</Project>

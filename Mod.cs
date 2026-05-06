@@ -1,0 +1,145 @@
+using System;
+using System.IO;
+using System.Linq;
+using Colossal.Logging;
+using Colossal.Serialization.Entities;
+using Game;
+using Game.Modding;
+using Game.SceneFlow;
+using HarmonyLib;
+using VanillaProfiler.Diagnostics;
+using VanillaProfiler.Output;
+
+namespace VanillaProfiler
+{
+    /// <summary>
+    /// Minimal profiler mod — zero gameplay, zero entities.
+    /// Measures FPS, frame time, simulation phases, memory.
+    /// Output: Logs/VanillaProfiler.log in game logs directory.
+    /// </summary>
+    public sealed class VanillaProfilerMod : IMod
+    {
+        internal const string HARMONY_ID = "com.vanillaprofiler";
+
+        public static ILog Log { get; private set; }
+
+        private Harmony m_Harmony;
+        private Profiler m_Profiler;
+        private UnityEngine.GameObject m_OverlayObject;
+
+        public void OnLoad(UpdateSystem updateSystem)
+        {
+            MainThreadGuard.Capture();
+            Log = LogManager.GetLogger(nameof(VanillaProfiler));
+            ModLog.Info("VanillaProfiler loading...");
+
+            try
+            {
+                SettingsStore.Load();
+
+                var logDir = Path.Combine(
+                    UnityEngine.Application.persistentDataPath,
+                    "Logs"
+                );
+
+                m_Profiler = new Profiler(new IReportSink[] { new LogFileSink(logDir) });
+                ProfilerHost.Register(m_Profiler);
+                // Wipe stale city counts when the player returns to the main menu so the
+                // overlay/exporter doesn't display data from the previous save.
+                GameManager.instance.onGameLoadingComplete += OnGameLoadingComplete;
+                // Hide overlay/badges during city loading only. MainMenu preloads are
+                // treated as no-city state so loading cannot get stuck if the app exits
+                // before a matching completion callback.
+                GameManager.instance.onGamePreload += OnGamePreload;
+                ModLog.Flush();  // replay buffered early-init messages into VanillaProfiler.log
+                ModLog.Info($"Log directory: {logDir}");
+                ModAttribution.PrewarmLoadedAssemblies();
+
+                // Register tick counter in SimulationSystemGroup
+                updateSystem.UpdateAt<SimTickCounterSystem>(SystemUpdatePhase.GameSimulation);
+                updateSystem.UpdateAt<CityContextSystem>(SystemUpdatePhase.GameSimulation);
+
+                // Apply Harmony patches (UpdateSystem.Update measurement)
+                m_Harmony = new Harmony(HARMONY_ID);
+                bool phasePatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
+                    new[] { typeof(SystemUpdatePhase) }) != null;
+                bool indexedPatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
+                    new[] { typeof(SystemUpdatePhase), typeof(uint), typeof(int) }) != null;
+
+                ModLog.Info($"Hook check: Update(SystemUpdatePhase) = {(phasePatchAvailable ? "OK" : "MISSING")}");
+                ModLog.Info($"Hook check: Update(SystemUpdatePhase,uint,int) = {(indexedPatchAvailable ? "OK" : "MISSING")}");
+
+                m_Harmony.PatchAll(typeof(VanillaProfilerMod).Assembly);
+
+                int patchCount = m_Harmony.GetPatchedMethods()
+                    .Count(method => Harmony.GetPatchInfo(method)?.Owners?.Contains(HARMONY_ID) == true);
+                ModLog.Info($"Harmony patches applied: {patchCount}");
+
+                // Create persistent overlay GameObject
+                m_OverlayObject = new UnityEngine.GameObject("VanillaProfilerOverlay");
+                UnityEngine.Object.DontDestroyOnLoad(m_OverlayObject);
+                m_OverlayObject.AddComponent<ProfilerOverlay>();
+
+                ModLog.Info("VanillaProfiler ready.");
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error($"VanillaProfiler load failed: {ex}");
+                Cleanup(logDispose: false);
+                throw;
+            }
+        }
+
+        public void OnDispose()
+        {
+            Cleanup(logDispose: true);
+        }
+
+        private static void OnGameLoadingComplete(Purpose purpose, GameMode mode)
+        {
+            // Profile only the actual gameplay session. Editor mode loads a similar
+            // ECS world but the player wouldn't be looking at gameplay performance —
+            // it would just clutter the editor with our overlay.
+            ProfilerHost.TryGet()?.SetGameLoaded(mode == GameMode.Game);
+        }
+
+        private static void OnGamePreload(Purpose purpose, GameMode mode)
+        {
+            ProfilerHost.TryGet()?.BeginLoading(mode == GameMode.Game);
+        }
+
+        private void Cleanup(bool logDispose)
+        {
+            if (logDispose)
+                TryCleanup("log dispose", () => ModLog.Info("VanillaProfiler disposing"));
+
+            TryCleanup("unsubscribe loading callback",
+                () => GameManager.instance.onGameLoadingComplete -= OnGameLoadingComplete);
+            TryCleanup("unsubscribe preload callback",
+                () => GameManager.instance.onGamePreload -= OnGamePreload);
+            TryCleanup("unregister profiler host", ProfilerHost.Unregister);
+            TryCleanup("unpatch harmony", () => m_Harmony?.UnpatchAll(HARMONY_ID));
+            TryCleanup("destroy overlay", () =>
+            {
+                if (m_OverlayObject == null) return;
+                UnityEngine.Object.Destroy(m_OverlayObject);
+                m_OverlayObject = null;
+            });
+            TryCleanup("dispose profiler", () =>
+            {
+                m_Profiler?.Dispose();
+                m_Profiler = null;
+            });
+            TryCleanup("reset attribution", ModAttribution.Reset);
+            TryCleanup("reset auto-profiler", SystemAutoProfiler.Reset);
+            TryCleanup("reset city context", CityContext.Reset);
+            m_Harmony = null;
+        }
+
+        private static void TryCleanup(string step, Action action)
+        {
+            try { action?.Invoke(); }
+            catch (Exception ex) { Log?.Warn($"VanillaProfiler cleanup failed ({step}): {ex}"); }
+        }
+    }
+}

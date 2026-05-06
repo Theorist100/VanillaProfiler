@@ -1,0 +1,72 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.dll
+*.pdb
+
+# Node.js / UI
+node_modules/
+CivicSurvival/UI/build/
+CivicSurvival/UI_old/
+CivicSurvival/UI/.ui-build-stamp
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+
+# JetBrains Rider
+.idea/
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Unity
+Library/
+Temp/
+
+# RAG index (generated artifacts, restored by Extractor)
+rag-index/
+CivicRAG/data/
+
+# Logs
+*.log
+
+# Python (CivicServer)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Python environment
+CivicServer/.env
+CivicServer/venv/
+
+# Local dev files
+.claude/
+local/
+*.local.*
+CLAUDE.md
+tmpclaude-*

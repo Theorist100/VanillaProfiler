@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Publish>
+  <ModId Value="VanillaProfiler" />
+  <DisplayName Value="Vanilla Profiler" />
+  <ShortDescription Value="Lightweight in-game profiler — find which mod is lagging your game." />
+  <LongDescription>## Vanilla Profiler
+
+A lightweight in-game profiler that gives normal players a simple status, a plain-language diagnosis, and a support file to send when a modded city starts lagging.
+
+### What it shows
+
+- **Status screen** — Good / Warning / Problem with the likely cause
+- **Diagnosis screen** — plain-language explanation and next steps
+- **Details screen** — advanced Top Mods and system tables for support
+- **Memory leak detector** — flags sustained growth across the recent report window
+- **60-second FPS sparkline** — see the trend at a glance
+- **Auto-screenshots on stutters** — frames over 100 ms get captured to disk for bug reports
+
+### Hotkeys
+
+- **Ctrl+F7** — Toggle spike screenshots
+- **Ctrl+F8** — Settings panel
+- **Ctrl+F9** — Cycle overlay mode (Status → Diagnosis → Details → Hidden)
+- **Ctrl+F10** — Force log dump
+- **Ctrl+F11** — Create a support file (system info, mods, stats, log tail)
+- **Ctrl+F12** — Cycle overlay position
+
+### Output locations
+
+- Continuous log: `Logs/VanillaProfiler.log`
+- Diagnostic reports: `Reports/CSII_Report_*.txt`
+- Spike screenshots: `Logs/spikes/spike_*.png`
+- Settings: `VanillaProfiler/settings.json`
+
+All paths are inside `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\`.
+
+### Compatibility
+
+- **Works with any mod combination** — no gameplay changes, no entity creation, no save persistence
+- **Read-only ECS queries** — never mutates game state
+- **Detects Harmony patch conflicts** — lists methods patched by more than one mod
+
+### Performance overhead
+
+Adds approximately **15 microseconds per frame** from Stopwatch instrumentation across ~300 systems. Negligible compared to the systems being measured.
+
+### How to share a bug report
+
+1. Press **Ctrl+F11** while the lag is happening
+2. Find `CSII_Report_*.txt` in your Reports folder
+3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
+  <Thumbnail Value="Properties/thumbnail.png" />
+  <ModVersion Value="1.0.0" />
+  <GameVersion Value="*" />
+  <AccessLevel Value="Public" />
+  <Tag Value="Code Mod" />
+  <ChangeLog>v1.0.0 — Initial release
+- Player Status and Diagnosis screens
+- Bottleneck classifier (RENDER / SIM / MEMORY / BALANCED)
+- Per-mod CPU attribution via IMod scan
+- Memory leak detector (MB/s sliding window)
+- FPS sparkline (60-second history)
+- Spike auto-screenshots (frame &gt; 100 ms threshold)
+- Harmony conflict detector
+- One-click diagnostic export (Ctrl+F11)
+- In-game settings panel (Ctrl+F8)</ChangeLog>
+  <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
+</Publish>
