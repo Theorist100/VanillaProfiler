@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Publish>
-  <ModId Value="VanillaProfiler" />
+  <ModId Value="142844" />
   <DisplayName Value="Vanilla Profiler" />
   <ShortDescription Value="Lightweight in-game profiler — find which mod is lagging your game." />
   <LongDescription>## Vanilla Profiler
