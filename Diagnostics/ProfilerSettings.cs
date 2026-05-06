@@ -16,7 +16,7 @@ namespace VanillaProfiler.Diagnostics
         // Report cadence (seconds). Clamped on load to a sane range.
         public float ReportIntervalSec = 5.0f;
 
-        // Default overlay mode at startup. 0=Status 1=Diagnosis 2=Details 3=Hidden
+        // Default overlay mode at startup. 0=Status 1=Diagnosis 2=Recommendations 3=Details 4=Hidden
         public int DefaultMode = 0;
 
         // Default screen anchor. 0=TL 1=TR 2=BR 3=BL
@@ -53,7 +53,7 @@ namespace VanillaProfiler.Diagnostics
                 changed |= Set(ref ReportIntervalSec, 5f);
             if (ReportIntervalSec < 1f) changed |= Set(ref ReportIntervalSec, 1f);
             if (ReportIntervalSec > 60f) changed |= Set(ref ReportIntervalSec, 60f);
-            if (DefaultMode < 0 || DefaultMode > 3) changed |= Set(ref DefaultMode, 0);
+            if (DefaultMode < 0 || DefaultMode > 4) changed |= Set(ref DefaultMode, 0);
             if (Anchor < 0 || Anchor > 3) changed |= Set(ref Anchor, 0);
             if (SparklineWidth < 10) changed |= Set(ref SparklineWidth, 10);
             if (SparklineWidth > 60) changed |= Set(ref SparklineWidth, 60);

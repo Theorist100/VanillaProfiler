@@ -23,7 +23,6 @@ namespace VanillaProfiler
             public string Name;
             public bool IsVanilla;
             public string ModName;
-            public bool Skip;
         }
 
         private static readonly Dictionary<Type, SystemInfo> s_Cache = new();
@@ -67,7 +66,6 @@ namespace VanillaProfiler
                     info = BuildInfo(type);
                     s_Cache[type] = info;
                 }
-                if (info.Skip) return;
                 if (info.IsVanilla && !SettingsStore.Current.ProfileVanillaSystems) return;
 
                 ProfilerHost.TryGet()?.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
@@ -78,9 +76,10 @@ namespace VanillaProfiler
         private static SystemInfo BuildInfo(Type type)
         {
             string modName = ModAttribution.Resolve(type);
-            if (modName == ModAttribution.PROFILER)
-                return new SystemInfo { Skip = true };
 
+            // Profiler systems used to be skipped here; include them so the player
+            // can see how much VanillaProfiler itself costs and confirm it's not
+            // making things worse than the mod they're trying to diagnose.
             return new SystemInfo
             {
                 Name = string.IsNullOrEmpty(type.Name) ? "<anonymous>" : type.Name,

@@ -19,6 +19,14 @@ namespace VanillaProfiler.Diagnostics
         MemoryBound,
     }
 
+    /// <summary>Confidence that the render phase is the bottleneck. Drives advice depth.</summary>
+    public enum RenderBoundSeverity
+    {
+        None = 0,    // not render-bound, or signal too weak to act on
+        Mild,        // render is heavier than sim but within normal range
+        Severe,      // multiple signals point to a CPU-side render lock
+    }
+
     /// <summary>
     /// Player-facing summary of the latest configured report window.
     /// Hints carry short, actionable strings — overlays render them verbatim.
@@ -33,6 +41,20 @@ namespace VanillaProfiler.Diagnostics
         public BottleneckKind Bottleneck;
         public string MemoryHint;       // "Stable" | "Growing" | "LEAK SUSPECTED: +120 MB over 30s"
         public string BottleneckHint;   // short actionable advice
+
+        // Per-frame averages of the two main phases. Diagnosis uses absolute ms to
+        // pick how detailed the advice should be.
+        public double RenderPhaseMs;
+        public double SimPhaseMs;
+
+        // Multi-signal score for render-bound severity. Computed only when the
+        // bottleneck is RenderBound; higher value unlocks more specific advice.
+        public RenderBoundSeverity RenderSeverity;
+
+        // Number of signals that fired ("render heavy", "sim quiet", "stutter pattern",
+        // "vanilla-render-system in top"). Exposed for the support file so triagers
+        // see the breakdown, not just the verdict.
+        public int RenderSignalScore;
     }
 
     public static class HealthClassifier
@@ -68,10 +90,82 @@ namespace VanillaProfiler.Diagnostics
             report.Overall = Worst(report.FpsLevel, report.StutterLevel, report.MemoryLevel, report.GrowthLevel);
 
             report.MemoryHint = BuildMemoryHint(mem);
+            report.RenderPhaseMs = renderPhaseMs;
+            report.SimPhaseMs = simPhaseMs;
             (report.Bottleneck, report.BottleneckHint) = ClassifyBottleneck(
                 snap.AvgFrameMs, simPhaseMs, renderPhaseMs, snap.ManagedGrowthMBperSec);
 
+            if (report.Bottleneck == BottleneckKind.RenderBound)
+            {
+                int score = ScoreRenderBoundSignals(snap, simPhaseMs, renderPhaseMs);
+                report.RenderSignalScore = score;
+                if (score >= RENDER_SEVERE_SCORE) report.RenderSeverity = RenderBoundSeverity.Severe;
+                else if (score >= RENDER_MILD_SCORE) report.RenderSeverity = RenderBoundSeverity.Mild;
+            }
+
             return report;
+        }
+
+        // Multi-signal score for "this looks like a CPU-side rendering bottleneck".
+        // Each independent symptom adds 1 point; we report Severe only when at least
+        // 3 of 5 fire so a single noisy measurement can't trigger NVIDIA-specific advice.
+        private const double RENDER_HEAVY_MS = 50.0;
+        private const double RENDER_MEDIUM_MS = 30.0;
+        private const double RENDER_DOMINANCE_HIGH = 0.70;
+        private const double RENDER_DOMINANCE_MEDIUM = 0.55;
+        private const double STUTTER_RATIO = 2.5;
+        private const double SIM_QUIET_FRACTION = 0.20;
+        private const int RENDER_SEVERE_SCORE = 3;
+        private const int RENDER_MILD_SCORE = 2;
+
+        private static int ScoreRenderBoundSignals(OverlaySnapshot snap, double simMs, double renderMs)
+        {
+            int score = 0;
+            double frameMs = snap.AvgFrameMs;
+            if (frameMs <= 0) return 0;
+
+            // 1) Absolute render time is far above the 5-25 ms norm.
+            if (renderMs >= RENDER_HEAVY_MS) score += 2;
+            else if (renderMs >= RENDER_MEDIUM_MS) score += 1;
+
+            // 2) Render phase dominates the frame budget.
+            double renderShare = renderMs / frameMs;
+            if (renderShare >= RENDER_DOMINANCE_HIGH) score += 1;
+            else if (renderShare >= RENDER_DOMINANCE_MEDIUM) score += 0;
+
+            // 3) Sim is comparatively quiet — confirms it's not a heavy gameplay mod.
+            if (frameMs > 0 && simMs / frameMs < SIM_QUIET_FRACTION) score += 1;
+
+            // 4) Frame pacing irregular — max far above avg often correlates with
+            //    CPU locking GPU (the pre-rendered-frames-=-1 signature).
+            if (snap.MaxFrameMs >= snap.AvgFrameMs * STUTTER_RATIO) score += 1;
+
+            // 5) Top vanilla system is render-side (BatchInstanceSystem etc.) and
+            //    consuming meaningful time — this is engine rendering, not a mod.
+            if (HasRenderHeavyVanillaTop(snap)) score += 1;
+
+            return score;
+        }
+
+        private static readonly string[] s_RenderHeavyVanillaSystems =
+        {
+            "BatchInstanceSystem",
+            "BatchDataSystem",
+            "PreCullingSystem",
+            "CullingSystem",
+            "RenderingSystem",
+            "LightSystem",
+            "ObjectInterpolateSystem",
+        };
+
+        private static bool HasRenderHeavyVanillaTop(OverlaySnapshot snap)
+        {
+            if (snap.TopVanillaSystems == null || snap.TopVanillaSystems.Length == 0) return false;
+            var top = snap.TopVanillaSystems[0];
+            if (top.TotalMs < 30.0) return false;
+            foreach (var name in s_RenderHeavyVanillaSystems)
+                if (top.Name == name) return true;
+            return false;
         }
 
         private static HealthLevel ClassifyFps(double avgFps)

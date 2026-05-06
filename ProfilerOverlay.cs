@@ -43,6 +43,7 @@ namespace VanillaProfiler
             {
                 new StatusMode(),
                 new DiagnosisMode(),
+                new RecommendationsMode(),
                 new DetailsMode(),
                 new HiddenMode(),
             };

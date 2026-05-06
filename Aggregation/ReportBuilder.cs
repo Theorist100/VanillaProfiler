@@ -39,6 +39,8 @@ namespace VanillaProfiler.Aggregation
                     : 0;
             }
 
+            (double profilerMs, double profilerPct) = ComputeProfilerSelfCost(m, avgFrameMs);
+
             return new OverlaySnapshot
             {
                 AvgFps = avgFps,
@@ -55,7 +57,21 @@ namespace VanillaProfiler.Aggregation
                 TopMods = BuildTop(m.ModAggregate, TOP_N),
                 ManagedMB = mem.ManagedBytes / BYTES_PER_MB,
                 ManagedDeltaMB = mem.ManagedDelta / BYTES_PER_MB,
+                ProfilerSelfMs = profilerMs,
+                ProfilerSelfPercent = profilerPct,
             };
+        }
+
+        private const string PROFILER_MOD_NAME = "VanillaProfiler";
+
+        private static (double ms, double pct) ComputeProfilerSelfCost(MetricsSample m, double avgFrameMs)
+        {
+            if (m.FrameCount <= 0) return (0, 0);
+            if (!m.ModAggregate.TryGetValue(PROFILER_MOD_NAME, out var phase)) return (0, 0);
+            double totalMs = phase.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
+            double perFrameMs = totalMs / m.FrameCount;
+            double pct = avgFrameMs > 0 ? (perFrameMs / avgFrameMs) * 100.0 : 0;
+            return (perFrameMs, pct);
         }
 
         private static (string, double)[] BuildTop(Dictionary<string, PhaseData> systems, int n)

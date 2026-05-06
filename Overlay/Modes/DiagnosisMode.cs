@@ -15,9 +15,9 @@ namespace VanillaProfiler.Overlay.Modes
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
             // header (2) + Problem (1) + spacer (1) + LIKELY CAUSE section (1)
-            // + cause lines (worst case 2) + WHAT TO DO section (1) + advice (worst 3).
+            // + cause lines (worst case 2) + WHAT TO DO section (1) + advice (worst 4).
             // SUSPECTED MOD section (header + body = 2 lines) only when a mod stands out.
-            int lines = 11;
+            int lines = 12;
             if (!string.IsNullOrEmpty(TopMod(snapshot))) lines += 2;
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
@@ -81,7 +81,15 @@ namespace VanillaProfiler.Overlay.Modes
                 return new[] { "The simulation is taking most of the frame.", "This can be a large city or a heavy gameplay mod." };
 
             if (health.Bottleneck == BottleneckKind.RenderBound)
+            {
+                if (health.RenderSeverity == RenderBoundSeverity.Severe)
+                    return new[]
+                    {
+                        $"CPU rendering is very heavy ({health.RenderPhaseMs:F0} ms/frame).",
+                        "Multiple signals point to a CPU-side render lock.",
+                    };
                 return new[] { "Rendering is taking most of the frame.", "Lower graphics settings may help." };
+            }
 
             if (health.StutterLevel == HealthLevel.Poor)
                 return new[] { "Frame time has large spikes.", "Check if this happens after a specific action." };
@@ -95,7 +103,16 @@ namespace VanillaProfiler.Overlay.Modes
                 return new[] { "1. Keep playing normally.", "2. Press Ctrl+F11 only if someone asks for a report." };
 
             if (health.Bottleneck == BottleneckKind.RenderBound)
+            {
+                if (health.RenderSeverity == RenderBoundSeverity.Severe)
+                    return new[]
+                    {
+                        "1. Open the Recommendations screen (next mode).",
+                        "2. Apply the listed render fixes one at a time.",
+                        "3. Re-check this report after each change.",
+                    };
                 return new[] { "1. Lower graphics settings.", "2. If it continues, press Ctrl+F11 and send the report." };
+            }
 
             // No mod stands out and the slow systems are vanilla — this is the "your
             // city / hardware / settings" case, not a "mod broke the game" case. Don't

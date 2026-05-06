@@ -15,8 +15,8 @@ namespace VanillaProfiler.Overlay.Modes
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
             // header (title + breadcrumb), 4 data rows (Status/Cause/FPS/Memory),
-            // optional Likely-mod row only if a mod stands out.
-            int lines = 6;
+            // a permanent Profiler-self row, and an optional Likely-mod row.
+            int lines = 7;
             if (!string.IsNullOrEmpty(TopMod(snapshot))) lines++;
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
@@ -35,6 +35,13 @@ namespace VanillaProfiler.Overlay.Modes
             OverlayPanel.DrawLine(ctx, $"FPS:    {snapshot.AvgFps:F0} avg / {snapshot.MinFps:F0} min", ctx.Theme.BodyStyle);
             OverlayPanel.DrawLine(ctx, $"Memory: {MemoryText(health)}",
                 ctx.Theme.StyleForHealth(MemoryWorst(health)));
+
+            // Always-on profiler self-cost so players can see the mod isn't the
+            // bottleneck before assuming it is. Labeled "/frame" so it's not
+            // confused with the total-over-window numbers in the Details screen.
+            OverlayPanel.DrawLine(ctx,
+                $"Profiler self: {snapshot.ProfilerSelfMs:F2} ms/frame ({snapshot.ProfilerSelfPercent:F2}% of frame)",
+                ctx.Theme.DimStyle);
 
             // Only show the "Likely mod:" line when a mod actually stands out. The
             // previous "Likely mod: no mod stands out yet" reads as a contradiction

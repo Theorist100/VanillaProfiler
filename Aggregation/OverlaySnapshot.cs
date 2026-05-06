@@ -20,5 +20,11 @@ namespace VanillaProfiler
         public (string ModName, double TotalMs)[] TopMods;
         public double ManagedMB;
         public double ManagedDeltaMB;
+
+        // Profiler's own measured cost over the window. Always populated so the
+        // overlay can advertise "we cost X ms / Y%" up front and players can see
+        // for themselves that the profiler isn't the bottleneck.
+        public double ProfilerSelfMs;
+        public double ProfilerSelfPercent;
     }
 }

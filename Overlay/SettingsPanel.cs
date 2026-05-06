@@ -17,17 +17,17 @@ namespace VanillaProfiler.Overlay
     /// </summary>
     public sealed class SettingsPanel
     {
-        private const float W = 420f;
+        private const float W = 480f;
         // Base form height; dynamic rows (custom scale / validation error) are added
         // by MeasureHeight so future fields don't silently clip or leave huge gaps.
-        private const float BASE_H = 420f;
+        private const float BASE_H = 478f;
         private const int WINDOW_ID = 0xC1F1C1;
         private const float SAVE_DEBOUNCE_S = 0.5f;
         private const float MIN_VISIBLE_PX = 100f;
 
         public event EventHandler OnApplied;
 
-        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Details", "Hidden" };
+        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Hidden" };
         private static readonly string[] s_AnchorLabels = { "Top-L", "Top-R", "Bot-R", "Bot-L" };
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
@@ -44,6 +44,7 @@ namespace VanillaProfiler.Overlay
         private bool m_DirtySpikeScreenshots;
         private bool m_DirtySpikeThreshold;
         private bool m_DirtyUiScale;
+        private bool m_DirtyProfileVanilla;
 
         // Draggable window state. Rect is in logical (pre-GUI.matrix) coordinates.
         private Rect m_WindowRect;
@@ -67,6 +68,8 @@ namespace VanillaProfiler.Overlay
                 m_Draft.Anchor = live.Anchor;
             if (!m_DirtySpikeScreenshots)
                 m_Draft.SpikeScreenshots = live.SpikeScreenshots;
+            if (!m_DirtyProfileVanilla)
+                m_Draft.ProfileVanillaSystems = live.ProfileVanillaSystems;
 
             if (m_PosDirty && Time.realtimeSinceStartup - m_PosDirtyAt >= SAVE_DEBOUNCE_S)
                 FlushPendingPosition();
@@ -173,6 +176,21 @@ namespace VanillaProfiler.Overlay
                 m_Draft.SpikeScreenshots = newSpike;
                 m_DirtySpikeScreenshots = true;
             }
+            ly += OverlayPanel.LINE_H + 4f;
+
+            bool newProfileVanilla = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                m_Draft.ProfileVanillaSystems, " Profile vanilla systems", theme.ToggleStyle);
+            if (newProfileVanilla != m_Draft.ProfileVanillaSystems)
+            {
+                m_Draft.ProfileVanillaSystems = newProfileVanilla;
+                m_DirtyProfileVanilla = true;
+            }
+            ly += OverlayPanel.LINE_H + 2f;
+
+            GUI.Label(
+                new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                "    Slows the game — only enable while investigating a vanilla system.",
+                theme.HintStyle);
             ly += OverlayPanel.LINE_H + 4f;
 
             ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Spike threshold (ms)",
@@ -316,6 +334,7 @@ namespace VanillaProfiler.Overlay
             if (m_DirtySpikeScreenshots) merged.SpikeScreenshots = m_Draft.SpikeScreenshots;
             if (m_DirtySpikeThreshold) merged.SpikeThresholdMs = m_Draft.SpikeThresholdMs;
             if (m_DirtyUiScale) merged.UiScale = m_Draft.UiScale;
+            if (m_DirtyProfileVanilla) merged.ProfileVanillaSystems = m_Draft.ProfileVanillaSystems;
             if (m_PosDirty)
             {
                 merged.SettingsX = m_WindowRect.x;
@@ -383,6 +402,7 @@ namespace VanillaProfiler.Overlay
             m_DirtySpikeScreenshots = false;
             m_DirtySpikeThreshold = false;
             m_DirtyUiScale = false;
+            m_DirtyProfileVanilla = false;
         }
 
         private void MarkAllDirty()
@@ -394,6 +414,7 @@ namespace VanillaProfiler.Overlay
             m_DirtySpikeScreenshots = true;
             m_DirtySpikeThreshold = true;
             m_DirtyUiScale = true;
+            m_DirtyProfileVanilla = true;
         }
 
         private static bool TryParseFloat(string s, out float result)

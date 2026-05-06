@@ -50,17 +50,14 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.1.0" />
+  <ModVersion Value="1.2.0" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>v1.1.0 — Performance and reliability fixes
-- Cached phase strings in UpdateSystemPatch to remove per-tick allocations
-- Vanilla system auto-profiling is now opt-in (off by default; toggle in settings)
-- Cached FpsSparkline render output between samples to skip per-OnGUI rebuilds
-- Atomic writes for settings and exported reports (temp file + File.Replace)
-- Settings load now bounds memory with a size cap and StreamReader
-- Hardened enum handling: explicit Unknown defaults, no silent discard arms
-- Sparkline picks glyphs with rounding instead of truncation</ChangeLog>
+  <ChangeLog>v1.2.0 — Tips screen, smarter diagnosis, transparent overhead
+- New "Tips" screen (Ctrl+F9) with concrete fixes from Paradox's official optimization guide: NVIDIA pre-rendered frames, Volumetrics, LOD, Depth of Field, Motion Blur, mod isolation, Fullscreen Windowed, Terrain shadows
+- Render-bound diagnosis is now multi-signal — five independent checks must agree before suggesting a CPU-side render lock, so a single noisy measurement no longer triggers the wrong advice
+- Status screen always shows the profiler's own per-frame cost so you can see for yourself the profiler isn't your bottleneck
+- New setting "Profile vanilla systems" (off by default) — turn on only when investigating a specific vanilla system; the panel warns about the cost</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>
