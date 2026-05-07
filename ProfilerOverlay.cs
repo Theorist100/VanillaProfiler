@@ -45,6 +45,7 @@ namespace VanillaProfiler
                 new DiagnosisMode(),
                 new RecommendationsMode(),
                 new DetailsMode(),
+                new EngineMode(),
                 new HiddenMode(),
             };
             m_Buttons = new MainPanelButtons(m_Theme, m_Modes, new MainPanelButtons.Actions
@@ -150,13 +151,18 @@ namespace VanillaProfiler
 
             // Render order = Z-order (last drawn = topmost):
             //   1. Mode panel / badge (background layer)
-            //   2. Toast (overlay notification)
-            //   3. Settings panel (modal — must always be on top)
+            //   2. Settings panel
+            //   3. Toast (notification, no controls)
             //
             // The overlay only appears once a city is actually being measured. Splash,
             // main menu, editor menu and city-loading screens all stay clean. Settings
             // and toast still render because the player may want to configure the mod
             // pre-game; they are not lifecycle-gated.
+            //
+            // NoCity (main menu) intentionally renders nothing — DrawStandby was wired
+            // here briefly to address a "dead method" audit finding, but a badge in the
+            // main menu is intrusive for the common-case player who only wants to play.
+            // The standby badge stays defined for a future opt-in setting.
             if (lifecycle == ProfilerLifecycleState.Settling)
                 OverlayBadges.DrawSettling(m_Theme, scale);
             else if (lifecycle == ProfilerLifecycleState.Active && mode.IsHidden)
@@ -165,8 +171,8 @@ namespace VanillaProfiler
                 DrawMainPanel(profiler, mode, snapshot, health, scale);
             // else: Initializing / LoadingCity / NoCity → nothing drawn
 
-            m_Toast.Draw(m_Theme, scale);
             m_Settings.Draw(m_Theme, scale);
+            m_Toast.Draw(m_Theme, scale);
         }
 
         private void DrawMainPanel(Profiler profiler, IOverlayMode mode, OverlaySnapshot snapshot, HealthReport health, float scale)
@@ -212,7 +218,7 @@ namespace VanillaProfiler
             // pre-snapshot phase.
             mode.Draw(ctx, snapshot, health);
 
-            m_ModeIndex = m_Buttons.Draw(rect, m_ModeIndex, m_Anchor);
+            SetModeIndex(m_Buttons.Draw(rect, m_ModeIndex, m_Anchor));
 
             // Drag handle = the top header band only. Buttons and text fields below
             // must still receive their own click events.
@@ -224,7 +230,16 @@ namespace VanillaProfiler
         // Action methods — invoked by hotkeys (OverlayInputHandler events) and
         // on-panel buttons. Single source of truth for each command.
 
-        private void DoCycleMode() => m_ModeIndex = (m_ModeIndex + 1) % m_Modes.Length;
+        private void DoCycleMode() => SetModeIndex((m_ModeIndex + 1) % m_Modes.Length);
+
+        private void SetModeIndex(int index)
+        {
+            index = Mathf.Clamp(index, 0, m_Modes.Length - 1);
+            if (index == m_ModeIndex) return;
+            m_ModeIndex = index;
+            if (m_Modes[m_ModeIndex] is RecommendationsMode)
+                GraphicsSettingsProbe.Invalidate();
+        }
 
         private void DoOpenSettings() => m_Settings.Toggle();
 
@@ -243,6 +258,7 @@ namespace VanillaProfiler
         {
             m_Anchor = m_Anchor.Cycle();
             SettingsStore.Current.Anchor = (int)m_Anchor;
+            m_Settings.SyncAnchorFromHotkey((int)m_Anchor);
             // Cycling anchor explicitly snaps the panel to a corner — discard
             // any prior manual drag so the next layout uses the preset.
             m_PanelPosition.SnapToAnchor();
@@ -252,6 +268,7 @@ namespace VanillaProfiler
         {
             bool next = !SpikeScreenshot.Enabled;
             SpikeScreenshot.Enabled = next;
+            m_Settings.SyncSpikeScreenshotsFromHotkey(next);
             m_Toast.Show(next ? "Spike screenshots: ON" : "Spike screenshots: OFF");
         }
 

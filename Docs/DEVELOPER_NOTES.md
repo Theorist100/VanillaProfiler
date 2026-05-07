@@ -17,8 +17,8 @@ The flow is always: collect → classify → render. Pick where you plug in:
 ### Per-frame metric (single-threaded)
 Hook into `Profiler.OnFrame` (called from `UpdateSystemPatch` Rendering phase, main thread). Add an instance accumulator field on `Profiler` directly — no lock needed because `OnFrame` is main-thread only. Drain and reset it in `Profiler.Report()`. Add a field to `OverlaySnapshot`, fill it in `ReportBuilder.Build`, render it in an `IOverlayMode` implementation.
 
-### Per-system metric (multi-threaded — only worker-thread path)
-Add a method on `MetricsAggregator` and guard the new dictionary with the existing instance lock. Expose it via a delegating `Profiler.RecordX(...)` method that worker-thread Harmony patches can call. **Do NOT** add new locked fields directly on `Profiler` — keep all multi-threaded state inside `MetricsAggregator`.
+### Per-system metric (main-thread)
+Add a method on `MetricsAggregator` and expose it via a delegating `Profiler.RecordX(...)` method from the Harmony patch. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
 
 ### Per-report metric
 If you only need a value once per report (e.g. a rare query), add it directly inside `Profiler.Report()` after `MetricsAggregator.Drain()`. Main-thread context — touch instance fields freely.
@@ -74,16 +74,17 @@ Signature touches: 1 px gold border on all four sides, 3 px gold accent strip on
 
 ## Thread safety
 
-The mod has **one and only one multi-threaded surface**: `Profiler.RecordSystem`, called from the `SystemBase.Update` Postfix patch which Unity Entities can schedule on any worker. It delegates to `MetricsAggregator`, whose instance lock is the single sync primitive.
+Profiler measurement state is **main-thread only**. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and is expected to run on the Unity main thread; it records into `MetricsAggregator` without locking.
 
 Everything else is **main-thread only**:
 - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread (rendering always is)
 - `OnSimTick` from `SimTickCounterSystem.OnUpdate` — ECS sim phase, main thread
 - `RecordPhase` from per-phase Postfix — main thread
+- `RecordSystem` from `SystemBase.Update` Postfix — main thread
 - `MemorySampler`, `MemoryHistory`, `FpsSparkline`, `CityContext` — touched only from `OnFrame`/`Report`/ECS update on the main thread
 - `LastSnapshot` / `LastHealth` written by `Report` and read by overlay — both main thread
 
-Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any in-flight worker-thread Postfix that captured a stale reference via `ProfilerHost.TryGet()` will no-op.
+Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a reference via `ProfilerHost.TryGet()` will no-op.
 
 `ProfilerHost.TryGet()` returns the current instance via `Volatile.Read`. **Never** combine `IsAvailable` with a separate `Current` access — that's TOCTOU. Capture into a local: `var p = ProfilerHost.TryGet(); p?.OnSimTick();`.
 
@@ -93,7 +94,7 @@ There's no automated test harness. Validation flow:
 
 1. **Compile clean.** `dotnet build --no-incremental` must show 0 errors, 0 warnings.
 2. **Load a small save.** Overlay should appear in Status mode within 5 seconds. All four indicators should be green after the first report.
-3. **Cycle modes (Ctrl+F9).** Status, Diagnosis, Details, and Hidden should render without overlap. Sparkline fills in within 60 s on Details.
+3. **Cycle modes (Ctrl+F9).** Status, Diagnosis, Tips, Details, Engine, and Hidden should render without overlap. Sparkline fills in within 60 s on Details. Engine should show non-zero CPU main / GPU frame time once a city is loaded.
 4. **Force a report (Ctrl+F10).** A new section should appear in `VanillaProfiler.log` immediately.
 5. **Export (Ctrl+F11).** A toast should appear; the file should be in `Reports/`. Open it and verify all sections.
 6. **Open settings (Ctrl+F8).** Edit the report interval to 1, click Apply & Save. Subsequent reports in `VanillaProfiler.log` should be every second.
@@ -106,7 +107,7 @@ There's no automated test harness. Validation flow:
 - **First report is delayed.** `MemoryHistory` needs 5 samples (≈ 25 s) before it can declare a leak. Health shows OK during this window even if memory is rising.
 - **Bottleneck classifier averages over 5 s.** A single bad frame won't change the verdict. This is by design — flapping verdicts confuse players.
 - **Mod attribution falls back to assembly name** if the mod's `IMod` is in a separate assembly from its systems. Most mods have everything in one DLL, so this is rare.
-- **Settings panel uses fixed-size segmented controls.** Long mode names get cut off. If you add a fifth mode, widen the segmented buttons or rotate to a dropdown.
+- **Settings panel uses fixed-size segmented controls.** Long mode names get cut off. The panel currently fits six modes (Status / Diag / Tips / Details / Engine / Hidden); a seventh mode would force widening the segmented buttons or rotating to a dropdown.
 
 ## Where to look first when debugging
 

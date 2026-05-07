@@ -32,7 +32,10 @@ namespace VanillaProfiler.Diagnostics
             {
                 if (File.Exists(backup) && TryLoadFrom(backup, "backup"))
                 {
-                    SaveCore();
+                    // Preserve backup: SaveCore's atomic File.Replace would otherwise
+                    // move the (currently missing) primary OVER the just-recovered
+                    // backup, destroying our only good copy.
+                    SaveCore(preserveBackup: true);
                     return;
                 }
                 Current = new ProfilerSettings();
@@ -45,7 +48,9 @@ namespace VanillaProfiler.Diagnostics
             if (File.Exists(backup) && TryLoadFrom(backup, "backup"))
             {
                 ModLog.Warn("Recovered settings from backup after primary file was corrupted");
-                SaveCore();
+                // Same reason as above — without preserveBackup, File.Replace would
+                // move the corrupt primary into backup and we'd lose the only good copy.
+                SaveCore(preserveBackup: true);
                 return;
             }
 
@@ -63,7 +68,8 @@ namespace VanillaProfiler.Diagnostics
 
         public static void Mutate(Action<ProfilerSettings> mutate, bool save)
         {
-            mutate?.Invoke(Current);
+            if ((object)mutate == null) return;
+            mutate(Current);
             Current.Clamp();
             if (save) SaveCore();
         }
@@ -106,7 +112,7 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
-        private static void SaveCore()
+        private static void SaveCore(bool preserveBackup = false)
         {
             string path = FilePath;
             string backup = path + ".bak";
@@ -117,11 +123,14 @@ namespace VanillaProfiler.Diagnostics
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
+                // preserveBackup=true skips the rotate-into-backup step. Recovery flows
+                // (primary missing or corrupt) need this — otherwise File.Replace would
+                // move the bad primary onto the just-recovered backup and trash it.
                 AtomicFileWriter.WriteAllText(
                     path,
                     JsonUtility.ToJson(Current, prettyPrint: true),
                     encoding: null,
-                    backupPath: backup);
+                    backupPath: preserveBackup ? null : backup);
             }
             catch (Exception ex)
             {

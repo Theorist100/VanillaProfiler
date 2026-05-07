@@ -15,7 +15,7 @@ Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) c
 ```
 VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
-├── Profiler.cs                 Aggregator. Owns the lock, the report writer, the snapshot.
+├── Profiler.cs                 Main-thread coordinator. Owns sinks, sampler, builder, snapshots.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic.
 ├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (main-thread cost).
 ├── UpdateSystemPatch.cs        Harmony patch — measures phase boundaries (Pre/Post/Render).
@@ -38,7 +38,7 @@ VanillaProfiler (assembly)
                     ┌──────────────────────────────────────────┐
                     │  Profiler  (instance, held by ProfilerHost)│
                     │  Delegates to:                             │
-                    │   • MetricsAggregator (locked dicts)       │
+                    │   • MetricsAggregator (single-threaded)    │
                     │   • MemorySampler                          │
                     │   • MemoryHistory + FpsSparkline           │
                     └──────────┬───────────────────────────────┘
@@ -62,7 +62,7 @@ VanillaProfiler (assembly)
                     └──────────────────┘  └──────────────────┘
 ```
 
-`Profiler` is an **instance** owned by `VanillaProfilerMod` and reachable via the static `ProfilerHost.TryGet()`. The only multi-threaded entry point is `Profiler.RecordSystem`, which delegates to `MetricsAggregator`'s internal lock — that is the single point of synchronisation in this mod. Everything else (`OnFrame`, `OnSimTick`, `RecordPhase`, `Report`, `MemorySampler`, `MemoryHistory`, `FpsSparkline`, `LastSnapshot`, `LastHealth`) is main-thread only.
+`Profiler` is an **instance** owned by `VanillaProfilerMod` and reachable via the static `ProfilerHost.TryGet()`. Measurement entry points (`OnFrame`, `OnSimTick`, `RecordPhase`, `RecordSystem`, `Report`) are main-thread only; `MainThreadGuard` asserts that contract. `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
 
 ## Key contracts
 
@@ -108,7 +108,7 @@ Pure function: `(snapshot, memoryHistory, simPhaseMs, renderPhaseMs) → HealthR
 - Overall level — worst of the four
 - Bottleneck verdict (RENDER / SIM / MEMORY / BALANCED) with a one-line hint
 
-The bottleneck logic uses **average phase ms per call** — derived from `Profiler.SumPhaseMs` which sums total ticks across phases matching a substring (`"GameSimulation"`, `"Rendering"`).
+The bottleneck logic uses **average phase ms per call** — derived from exact phase-key lookups for `UpdateSystem.GameSimulation` and `UpdateSystem.Rendering`.
 
 ## Harmony patches
 
@@ -120,26 +120,28 @@ The bottleneck logic uses **average phase ms per call** — derived from `Profil
 | `EntityCommandBufferPatch.PlaybackEntityManager` | `EntityCommandBuffer.Playback(EntityManager)` | ECB playback time, surfaced as `ECB.Playback` phase |
 | `EntityCommandBufferPatch.PlaybackExclusiveTransaction` | `EntityCommandBuffer.Playback(ExclusiveEntityTransaction)` | Same, alternate overload (gated when missing on the build) |
 
-`HarmonyConflictDetector` runs once after the first report (deferred to give other mods time to apply their patches). It enumerates `Harmony.GetAllPatchedMethods()` and lists any method patched by more than one owner. The result goes to `VanillaProfiler.log` as a one-off section.
+`HarmonyConflictDetector` runs once after the first report (deferred to give other mods time to apply their patches). It enumerates `Harmony.GetAllPatchedMethods()` and lists methods patched by more than one owner only when VanillaProfiler is one of those owners. The result goes to `VanillaProfiler.log` as a one-off section.
 
 ## Threading model
 
-The mod follows a **single multi-threaded entry point** rule rather than scattering locks everywhere:
+The mod follows a **main-thread measurement** rule rather than scattering locks everywhere:
 
-- **`Profiler.RecordSystem`** is the only API that can be called from worker threads. It is invoked from `SystemBase.Update` Postfix, which Unity Entities can schedule on any worker. It delegates to `MetricsAggregator`, whose internal lock is the only synchronisation primitive in the mod.
-- **Everything else is main-thread only:**
+- **`Profiler.RecordSystem`** is invoked from `SystemBase.Update` Postfix on the Unity main thread. It records into `MetricsAggregator` without locking.
+- **Measurement state is main-thread only:**
   - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread by Unity contract.
   - `OnSimTick` is called from `SimTickCounterSystem.OnUpdate` — ECS GameSimulation phase, main thread.
   - `RecordPhase` is called from the per-phase Postfix — main thread.
+  - `RecordSystem` is called from `SystemBase.Update` Postfix — main thread.
   - `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report`.
   - `LastSnapshot` and `LastHealth` are written by `Report` and read by `ProfilerOverlay.OnGUI` — both main thread.
-- **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so an in-flight worker-thread Postfix landing after `Mod.OnDispose` no-ops cleanly.
+- **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so a stale Harmony callback landing after `Mod.OnDispose` no-ops cleanly.
+- **Log output has its own lock.** `LogFileSink` serializes file IO because system messages can be routed from defensive off-thread diagnostics.
 - **`ProfilerHost.TryGet()`** does a single `Volatile.Read` of the instance reference. Callers must capture the result into a local variable before use; never write `ProfilerHost.IsAvailable` followed by `ProfilerHost.Current` — that's a TOCTOU bug.
 
 ## What this mod intentionally does NOT do
 
 - **No persistence beyond settings.** Nothing serialised in saves. Sessions are independent.
-- **No structural ECS changes.** Only read-only `EntityQuery.CalculateEntityCount()`. Patches are pre/postfix only — never transpilers, never finalizers.
+- **No structural ECS changes.** Only read-only `EntityQuery.CalculateEntityCount()`. Patches use prefix/postfix, plus a narrow finalizer only where needed to close `ProfilerMarker` scopes on thrown `SystemBase.Update()`.
 - **No UI Toolkit / Coherent UI.** IMGUI is sufficient and avoids the layering complexity of CS2's binding system.
 - **No quality recommendations beyond bottleneck hint.** "Render-bound, lower graphics" is generic enough; finer advice would be guesswork.
 - **No per-job worker-thread profiling.** Burst-compiled jobs run as native code outside `SystemBase.Update()`; their per-system cost cannot be observed from a mod in a release build. Unity Profiler with engine-level instrumentation is the only tool that can. We surface aggregate worker time when the `ProfilerCategory.Internal` markers are exposed (usually stripped in release — silently zero when missing).

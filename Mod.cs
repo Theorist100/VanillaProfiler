@@ -7,6 +7,7 @@ using Game;
 using Game.Modding;
 using Game.SceneFlow;
 using HarmonyLib;
+using VanillaProfiler.Aggregation;
 using VanillaProfiler.Diagnostics;
 using VanillaProfiler.Output;
 
@@ -37,13 +38,16 @@ namespace VanillaProfiler
             {
                 SettingsStore.Load();
 
-                var logDir = Path.Combine(
-                    UnityEngine.Application.persistentDataPath,
-                    "Logs"
-                );
+                var logDir = LogFileSink.GetLogDirectory(UnityEngine.Application.persistentDataPath);
 
                 m_Profiler = new Profiler(new IReportSink[] { new LogFileSink(logDir) });
                 ProfilerHost.Register(m_Profiler);
+                ModLog.Flush();  // replay buffered early-init messages before later live diagnostics
+
+                // Enumerate every ProfilerRecorder marker the build exposes. Diagnostic
+                // only — confirms MemorySampler's hardcoded counter names are still valid.
+                // Runs after Register so output lands in VanillaProfiler.log via ModLog.
+                MarkerEnumerator.LogAvailable();
                 // Wipe stale city counts when the player returns to the main menu so the
                 // overlay/exporter doesn't display data from the previous save.
                 GameManager.instance.onGameLoadingComplete += OnGameLoadingComplete;
@@ -51,7 +55,6 @@ namespace VanillaProfiler
                 // treated as no-city state so loading cannot get stuck if the app exits
                 // before a matching completion callback.
                 GameManager.instance.onGamePreload += OnGamePreload;
-                ModLog.Flush();  // replay buffered early-init messages into VanillaProfiler.log
                 ModLog.Info($"Log directory: {logDir}");
                 ModAttribution.PrewarmLoadedAssemblies();
 
@@ -133,6 +136,7 @@ namespace VanillaProfiler
             TryCleanup("reset attribution", ModAttribution.Reset);
             TryCleanup("reset auto-profiler", SystemAutoProfiler.Reset);
             TryCleanup("reset city context", CityContext.Reset);
+            TryCleanup("clear buffered log messages", ModLog.ClearBuffer);
             m_Harmony = null;
         }
 

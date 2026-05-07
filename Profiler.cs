@@ -73,29 +73,22 @@ namespace VanillaProfiler
             m_Memory.Dispose();
         }
 
-        public void ResetSession()
-        {
-            MainThreadGuard.AssertMainThread(nameof(ResetSession));
-            if (m_Disposed) return;
-            ResetSessionState();
-            if (IsGameLoaded)
-            {
-                m_LifecycleState = ProfilerLifecycleState.Settling;
-                MemoryHistory.SuppressNextReports(5);
-            }
-        }
-
         public void SetGameLoaded(bool gameLoaded)
         {
             MainThreadGuard.AssertMainThread(nameof(SetGameLoaded));
             if (m_Disposed) return;
-            if (gameLoaded && IsGameLoaded) return;
-            if (!gameLoaded && m_LifecycleState == ProfilerLifecycleState.NoCity) return;
 
-            var next = gameLoaded ? ProfilerLifecycleState.Settling : ProfilerLifecycleState.NoCity;
-            if (m_LifecycleState == next) return;
+            if (gameLoaded)
+            {
+                if (m_LifecycleState == ProfilerLifecycleState.Settling) return;
+                m_LifecycleState = ProfilerLifecycleState.Settling;
+            }
+            else
+            {
+                if (m_LifecycleState == ProfilerLifecycleState.NoCity) return;
+                m_LifecycleState = ProfilerLifecycleState.NoCity;
+            }
 
-            m_LifecycleState = next;
             ResetSessionState();
             CityContext.Reset();
             if (m_LifecycleState == ProfilerLifecycleState.Settling)
@@ -166,10 +159,12 @@ namespace VanillaProfiler
             if (IsGameLoaded)
                 SpikeScreenshot.OnFrame(frameMs);
 
+            float reportInterval = ReportInterval;
+            if (reportInterval <= 0f) reportInterval = 5f;
             m_ReportTimer += frameSec;
-            if (m_ReportTimer >= ReportInterval)
+            if (m_ReportTimer >= reportInterval)
             {
-                m_ReportTimer -= ReportInterval;
+                m_ReportTimer %= reportInterval;
                 Report(now);
             }
         }
@@ -188,13 +183,6 @@ namespace VanillaProfiler
         {
             MainThreadGuard.AssertMainThread(nameof(Report));
             if (m_Disposed) return;
-
-            if (m_LastReportTicks == 0)
-            {
-                m_LastReportTicks = nowTicks;
-                LogInfo("Skipped report until frame timing is initialized.");
-                return;
-            }
 
 #pragma warning disable CIVIC021 // Stopwatch.Frequency is a hardware constant, always >= 1
             float elapsedSec = (float)((nowTicks - m_LastReportTicks) / (double)Stopwatch.Frequency);
@@ -236,8 +224,17 @@ namespace VanillaProfiler
                 LastHealth = health;
                 m_LifecycleState = ProfilerLifecycleState.Active;
 
+                // Per-sink isolation: a misbehaving sink (e.g. disk full, AV scan locking
+                // the file) must not abort delivery to the others. We log the first failure
+                // and keep going; sink internals are expected to handle their own retries.
                 foreach (var sink in m_Sinks)
-                    sink.WriteReport(m_ReportCount, snapshot, health, metrics, memory);
+                {
+                    try { sink.WriteReport(m_ReportCount, snapshot, health, metrics, memory); }
+                    catch (Exception ex)
+                    {
+                        VanillaProfilerMod.Log?.Warn($"Sink {sink?.GetType().Name} WriteReport failed: {ex}");
+                    }
+                }
             }
         }
 
@@ -254,7 +251,16 @@ namespace VanillaProfiler
         {
             if (m_Disposed) return;
             foreach (var sink in m_Sinks)
-                sink.WriteSystemMessage(level, msg);
+            {
+                try
+                {
+                    sink.WriteSystemMessage(level, msg);
+                }
+                catch (Exception ex)
+                {
+                    VanillaProfilerMod.Log?.Warn($"VanillaProfiler sink system-write failed: {ex}");
+                }
+            }
         }
 
         private void ResetSessionState()

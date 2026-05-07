@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using UnityEngine;
 using VanillaProfiler.Diagnostics;
+using V = VanillaProfiler.Overlay.SettingsValidation;
 
 namespace VanillaProfiler.Overlay
 {
@@ -27,7 +28,7 @@ namespace VanillaProfiler.Overlay
 
         public event EventHandler OnApplied;
 
-        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Hidden" };
+        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Engine", "Hidden" };
         private static readonly string[] s_AnchorLabels = { "Top-L", "Top-R", "Bot-R", "Bot-L" };
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
@@ -73,6 +74,20 @@ namespace VanillaProfiler.Overlay
 
             if (m_PosDirty && Time.realtimeSinceStartup - m_PosDirtyAt >= SAVE_DEBOUNCE_S)
                 FlushPendingPosition();
+        }
+
+        public void SyncAnchorFromHotkey(int anchor)
+        {
+            if (m_Draft == null) return;
+            m_Draft.Anchor = anchor;
+            m_DirtyAnchor = false;
+        }
+
+        public void SyncSpikeScreenshotsFromHotkey(bool enabled)
+        {
+            if (m_Draft == null) return;
+            m_Draft.SpikeScreenshots = enabled;
+            m_DirtySpikeScreenshots = false;
         }
 
         public void Toggle()
@@ -353,37 +368,26 @@ namespace VanillaProfiler.Overlay
         private bool ValidateDraftFromText()
         {
             m_ErrorText = null;
+
             if (m_DirtyReportInterval)
             {
-                if (!TryParseFloat(m_IntervalText, out var v) || float.IsNaN(v) || float.IsInfinity(v))
-                    return Invalid("Report interval must be a number.");
-                if (v < 1f || v > 60f)
-                    return Invalid("Report interval must be 1-60.");
+                if (!V.TryFloatInRange(m_IntervalText, 1f, 60f, "Report interval", out var v, out m_ErrorText))
+                    return false;
                 m_Draft.ReportIntervalSec = v;
             }
             if (m_DirtySparklineWidth)
             {
-                if (!int.TryParse(m_SparklineWidthText, out var v))
-                    return Invalid("Sparkline width must be a whole number.");
-                if (v < 10 || v > 60)
-                    return Invalid("Sparkline width must be 10-60.");
+                if (!V.TryIntInRange(m_SparklineWidthText, 10, 60, "Sparkline width", out var v, out m_ErrorText))
+                    return false;
                 m_Draft.SparklineWidth = v;
             }
             if (m_DirtySpikeThreshold)
             {
-                if (!TryParseFloat(m_SpikeThresholdText, out var v) || float.IsNaN(v) || float.IsInfinity(v))
-                    return Invalid("Spike threshold must be a number.");
-                if (v < 33f || v > 1000f)
-                    return Invalid("Spike threshold must be 33-1000.");
+                if (!V.TryFloatInRange(m_SpikeThresholdText, 33f, 1000f, "Spike threshold", out var v, out m_ErrorText))
+                    return false;
                 m_Draft.SpikeThresholdMs = v;
             }
             return true;
-        }
-
-        private bool Invalid(string msg)
-        {
-            m_ErrorText = msg;
-            return false;
         }
 
         private void SyncTextFieldsFromDraft()
@@ -416,8 +420,5 @@ namespace VanillaProfiler.Overlay
             m_DirtyUiScale = true;
             m_DirtyProfileVanilla = true;
         }
-
-        private static bool TryParseFloat(string s, out float result)
-            => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
     }
 }

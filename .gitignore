@@ -80,3 +80,6 @@ Docs/TODO.md
 TODO.md
 PLAN.md
 REWORK_*.md
+
+# Audit findings — local only, not for publish
+AUDIT/

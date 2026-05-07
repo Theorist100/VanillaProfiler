@@ -56,9 +56,12 @@ namespace VanillaProfiler
             {
                 // This overload exists in newer DOTS but may be absent on the CS2 build —
                 // gate quietly so a missing target doesn't hard-fail Harmony.
-                return AccessTools.Method(typeof(EntityCommandBuffer),
+                bool exists = AccessTools.Method(typeof(EntityCommandBuffer),
                     nameof(EntityCommandBuffer.Playback),
                     new[] { typeof(ExclusiveEntityTransaction) }) != null;
+                if (!exists)
+                    ModLog.Info("EntityCommandBuffer.Playback(ExclusiveEntityTransaction) not present — second ECB path skipped");
+                return exists;
             }
 
             [HarmonyPrefix]

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 
 namespace VanillaProfiler
 {
@@ -10,12 +11,12 @@ namespace VanillaProfiler
     internal static class MainThreadGuard
     {
         private static int s_MainThreadId;
-        private static bool s_Warned;
+        private static int s_Warned;
 
         public static void Capture()
         {
             s_MainThreadId = Environment.CurrentManagedThreadId;
-            s_Warned = false;
+            s_Warned = 0;
         }
 
         [Conditional("DEBUG")]
@@ -26,8 +27,7 @@ namespace VanillaProfiler
             if (expected == 0 || actual == expected)
                 return;
 
-            if (s_Warned) return;
-            s_Warned = true;
+            if (Interlocked.CompareExchange(ref s_Warned, 1, 0) != 0) return;
             ModLog.Warn(
                 $"Main-thread contract violated in {caller}: expected thread {expected}, " +
                 $"actual thread {actual}");

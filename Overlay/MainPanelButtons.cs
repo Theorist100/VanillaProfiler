@@ -11,7 +11,9 @@ namespace VanillaProfiler.Overlay
     public sealed class MainPanelButtons
     {
         public const float ROW_HEIGHT = 38f;
-        public const float HINT_HEIGHT = 22f;
+        // Hint wraps to two lines so all six hotkeys fit at the default panel width
+        // (440 logical px). One row was clipping at Ctrl+F12 once F7+F10 were added.
+        public const float HINT_HEIGHT = 38f;
         public const float BLOCK_HEIGHT = ROW_HEIGHT * 2 + 8f + HINT_HEIGHT;
 
         public sealed class Actions
@@ -94,11 +96,15 @@ namespace VanillaProfiler.Overlay
 
         private void DrawHotkeyHint(float panelHeight, float lx, float fw)
         {
-            // Quiet hint line under the buttons — confirms hotkey equivalents for
-            // power users without competing with the buttons themselves.
+            // Quiet hint under the buttons — two lines so all six hotkeys fit at
+            // default panel width without clipping. Common ones first.
             float hintY = panelHeight - HINT_HEIGHT + 2f;
-            GUI.Label(new Rect(lx, hintY, fw, HINT_HEIGHT),
-                "Hotkeys: Ctrl+F9 next  •  Ctrl+F8 settings  •  Ctrl+F11 export  •  Ctrl+F12 snap  •  drag title",
+            float lineH = HINT_HEIGHT * 0.5f;
+            GUI.Label(new Rect(lx, hintY, fw, lineH),
+                "Ctrl+F9 mode  •  Ctrl+F8 settings  •  Ctrl+F11 export  •  Ctrl+F12 snap",
+                m_Theme.HintStyle);
+            GUI.Label(new Rect(lx, hintY + lineH, fw, lineH),
+                "Ctrl+F7 spike-shots  •  Ctrl+F10 force dump",
                 m_Theme.HintStyle);
         }
     }

@@ -5,6 +5,10 @@ namespace VanillaProfiler.Overlay.Modes
     /// <summary>
     /// Advanced view for mod authors / support — adds top mods, top vanilla systems,
     /// top mod systems and city context to Status's data.
+    ///
+    /// Per-thread CPU/GPU/PresentWait breakdown lives in EngineMode (focused engine
+    /// counters screen). Repeating it here just made two screens show the same row
+    /// with no added context, so Details now stays mod-attribution focused.
     /// </summary>
     public sealed class DetailsMode : IOverlayMode
     {
@@ -22,7 +26,6 @@ namespace VanillaProfiler.Overlay.Modes
             int lines = 8;
             if (CityContext.HasData) lines++;
             if (snapshot.GfxUsedMB > 0 || snapshot.AudioUsedMB > 0) lines++;
-            if (snapshot.MainThreadCpuMs > 0 || snapshot.RenderThreadCpuMs > 0) lines++;
             if (HasItems(snapshot.TopMods)) lines += 1 + snapshot.TopMods.Length;
             if (HasItems(snapshot.TopVanillaSystems)) lines += 1 + snapshot.TopVanillaSystems.Length;
             if (HasItems(snapshot.TopModSystems)) lines += 1 + snapshot.TopModSystems.Length;
@@ -58,10 +61,9 @@ namespace VanillaProfiler.Overlay.Modes
                     $"GPU memory:    {snapshot.GfxUsedMB,5:F0} MB Gfx,  {snapshot.AudioUsedMB,4:F0} MB audio",
                     ctx.Theme.DimStyle);
 
-            if (snapshot.MainThreadCpuMs > 0 || snapshot.RenderThreadCpuMs > 0 || snapshot.GpuFrameTimeMs > 0)
-                OverlayPanel.DrawLine(ctx,
-                    $"Threads:       CPU main {snapshot.MainThreadCpuMs,5:F1} ms  /  CPU render {snapshot.RenderThreadCpuMs,5:F1} ms  /  GPU {snapshot.GpuFrameTimeMs,5:F1} ms",
-                    ctx.Theme.DimStyle);
+            // Per-thread Main/Render/GPU/PresentWait breakdown lives in EngineMode —
+            // showing it here too just doubled the row without adding context. Bottleneck
+            // line below summarises the conclusion; Engine has the raw numbers.
 
             if (health != null)
                 OverlayPanel.DrawLine(ctx,

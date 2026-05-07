@@ -16,6 +16,7 @@ namespace VanillaProfiler.Output
     public sealed class LogFileSink : IReportSink
     {
         public const string LOG_FILENAME = "VanillaProfiler.log";
+        public const string LOG_DIR_NAME = "Logs";
 
         private const double MS_PER_SEC = 1000.0;
         private const double BYTES_PER_MB = 1024.0 * 1024.0;
@@ -24,6 +25,16 @@ namespace VanillaProfiler.Output
         private StreamWriter m_Writer;
         private DateTime m_LastIoFailureLogUtc = DateTime.MinValue;
         private DateTime m_NextOpenRetryUtc = DateTime.MinValue;
+        private bool m_Shutdown;
+
+        // Serializes file IO. The Profiler's hot path is main-thread-only, but ModLog
+        // dispatches every Info/Warn/Error through here, and MainThreadGuard.AssertMainThread
+        // itself logs from off-thread when a contract violation is detected. Without a lock
+        // those off-thread writes can interleave bytes with an in-progress report and tear
+        // the log file. Holding the lock around CloseWriter/TryOpenWriter is also necessary
+        // because the writer field is published across calls; a parallel writer could
+        // observe a half-disposed StreamWriter and crash with ObjectDisposedException.
+        private readonly object m_WriteLock = new();
 
         // Truncate the log on the first successful open of the session, then append
         // for the rest of the run. Without this, every session adds tens of MB to a
@@ -41,7 +52,11 @@ namespace VanillaProfiler.Output
 
         public void Initialize()
         {
-            _ = TryOpenWriter();
+            lock (m_WriteLock)
+            {
+                m_Shutdown = false;
+                _ = TryOpenWriter();
+            }
         }
 
         public void WriteSystemMessage(SystemLogLevel level, string message)
@@ -52,52 +67,74 @@ namespace VanillaProfiler.Output
                 SystemLogLevel.Warn => "[WARN]",
                 SystemLogLevel.Error => "[ERROR]",
                 SystemLogLevel.Unknown => "[INFO]",
-                _ => throw new ArgumentOutOfRangeException(nameof(level), level, "Unhandled SystemLogLevel"),
+                _ => "[INFO]",
             };
             WriteLine(Inv($"{DateTime.Now:HH:mm:ss} {tag} {message}"));
         }
 
         public void Shutdown()
         {
-            try { CloseWriter(); }
-            catch { }
+            lock (m_WriteLock)
+            {
+                m_Shutdown = true;
+                try { CloseWriter(); }
+                catch { }
+            }
         }
 
         public void WriteReport(int reportNumber, OverlaySnapshot snapshot, HealthReport health,
             MetricsSample metrics, MemorySample memory)
         {
-            WriteLine("");
-            WriteLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot?.WindowSeconds:F1}s) ══════"));
-
-            if (snapshot != null && metrics.FrameCount > 0)
+            // Hold the write lock for the whole report so an off-thread WriteSystemMessage
+            // (e.g. MainThreadGuard violation log) cannot interleave between report lines.
+            // C# lock is re-entrant on the same thread — nested WriteLine calls below
+            // re-acquire the lock cheaply without deadlocking.
+            lock (m_WriteLock)
             {
-                WriteLine(Inv($"Render: {snapshot.AvgFps:F1} FPS ({snapshot.MinFps:F1} min) | Frame: {snapshot.AvgFrameMs:F1}ms avg, {snapshot.MaxFrameMs:F1}ms max | Sim: {snapshot.SimTicksPerSec:F0} ticks/s"));
-                WriteLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
-            }
+                WriteLine("");
+                WriteLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot?.WindowSeconds:F1}s) ══════"));
 
-            WritePhaseTable(metrics.Phases);
-            WriteSystemTable("TOP MODS (by main-thread time)", metrics.ModAggregate, 10);
-            WriteSystemTable("VANILLA SYSTEMS — main-thread cost (top 15)", metrics.VanillaSystems, 15);
-            WriteSystemTable("MOD SYSTEMS — main-thread cost (top 15)", metrics.ModSystems, 15);
-            WriteMemorySection(memory);
-            WriteHealthSummary(health);
+                if (snapshot != null && metrics.FrameCount > 0)
+                {
+                    WriteLine(Inv($"Render: {snapshot.AvgFps:F1} FPS ({snapshot.MinFps:F1} min) | Frame: {snapshot.AvgFrameMs:F1}ms avg, {snapshot.MaxFrameMs:F1}ms max | Sim: {snapshot.SimTicksPerSec:F0} ticks/s"));
+                    WriteLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
+                }
+
+                WritePhaseTable(metrics.Phases);
+                WriteSystemTable("TOP MODS (by main-thread time)", metrics.ModAggregate, 10);
+                WriteSystemTable("VANILLA SYSTEMS — main-thread cost (top 15)", metrics.VanillaSystems, 15);
+                WriteSystemTable("MOD SYSTEMS — main-thread cost (top 15)", metrics.ModSystems, 15);
+                WriteMemorySection(memory);
+                WriteHealthSummary(health);
+            }
         }
 
         public void WriteLine(string msg)
         {
-            try
+            lock (m_WriteLock)
             {
-                if (m_Writer == null && DateTime.UtcNow < m_NextOpenRetryUtc)
-                    return;
-                if (m_Writer == null && !TryOpenWriter())
-                    return;
-                m_Writer?.WriteLine(msg);
-            }
-            catch (Exception ex)
-            {
-                CloseWriter();
-                m_NextOpenRetryUtc = DateTime.UtcNow.AddSeconds(5);
-                WarnIoFailure("write", ex);
+                if (m_Shutdown) return;
+                try
+                {
+                    if (m_Writer == null && DateTime.UtcNow < m_NextOpenRetryUtc)
+                        return;
+                    if (m_Writer == null && !TryOpenWriter())
+                        return;
+                    m_Writer?.WriteLine(msg);
+                }
+                catch (Exception ex)
+                {
+                    // CloseWriter calls StreamWriter.Dispose which itself flushes buffered
+                    // bytes and can throw IOException on disk full. The original write
+                    // failure is more interesting than a chained close failure, so guard
+                    // the close and force the writer field clear regardless. Mirrors
+                    // Shutdown's pattern.
+                    try { CloseWriter(); }
+                    catch { /* secondary IO failure — primary one is reported below */ }
+                    m_Writer = null;
+                    m_NextOpenRetryUtc = DateTime.UtcNow.AddSeconds(5);
+                    WarnIoFailure("write", ex);
+                }
             }
         }
 
@@ -166,10 +203,10 @@ namespace VanillaProfiler.Output
                     WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
                 if (mem.AudioUsedBytes > 0)
                     WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
-                if (mem.VideoUsedBytes > 0)
-                    WriteLine(Inv($"  Video:            {mem.VideoUsedBytes / BYTES_PER_MB,8:F1} MB"));
                 if (mem.SystemUsedBytes > 0)
                     WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                if (mem.AppResidentBytes > 0)
+                    WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB  (real physical RAM)"));
                 return;
             }
 
@@ -184,14 +221,27 @@ namespace VanillaProfiler.Output
                 WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.GfxUsedDelta)})"));
             if (mem.AudioUsedBytes > 0)
                 WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.AudioUsedDelta)})"));
-            if (mem.VideoUsedBytes > 0)
-                WriteLine(Inv($"  Video:            {mem.VideoUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.VideoUsedDelta)})"));
             if (mem.SystemUsedBytes > 0)
                 WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.AppResidentBytes > 0)
+                WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB"));
+            // GPU memory breakdown — splits the opaque Gfx total into buffers vs RTs so
+            // a leaking subsystem can be told apart from textures growing under streaming.
+            if (mem.UsedBuffersBytes > 0 || mem.RenderTexturesBytes > 0)
+                WriteLine(Inv($"  GPU breakdown:    Buffers {mem.UsedBuffersBytes / BYTES_PER_MB,7:F1} MB ({mem.UsedBuffersCount} bufs),  RT {mem.RenderTexturesBytes / BYTES_PER_MB,7:F1} MB"));
             if (mem.MainThreadCpuNs > 0 || mem.RenderThreadCpuNs > 0)
                 WriteLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
-            if (mem.JobWorkerTimeNs > 0 || mem.JobWorkerWaitNs > 0)
-                WriteLine(Inv($"  Job workers:      Exec {mem.JobWorkerTimeNs / 1_000_000.0,5:F2} ms aggregate,  MainWait {mem.JobWorkerWaitNs / 1_000_000.0,5:F2} ms  (no per-system attribution)"));
+            // PresentWait isolates GPU-bound vs CPU-bound: high PresentWait + low Main
+            // = GPU bottleneck, ECS-side optimisation will not help FPS.
+            if (mem.PresentWaitNs > 0)
+                WriteLine(Inv($"  Present wait:     {mem.PresentWaitNs / 1_000_000.0,5:F2} ms  (CPU stalled on GPU swapchain)"));
+            if (mem.DrawCallsCount > 0 || mem.SetPassCallsCount > 0 || mem.TrianglesCount > 0)
+            {
+                WriteLine(Inv($"  Render counts:    DrawCalls {mem.DrawCallsCount,5},  SetPass {mem.SetPassCallsCount,4},  Shadow casters {mem.ShadowCastersCount,5}"));
+                WriteLine(Inv($"                    Tris {mem.TrianglesCount / 1000,6:N0}K,  Verts {mem.VerticesCount / 1000,6:N0}K"));
+            }
+            if (mem.GcCollectCount > 0)
+                WriteLine(Inv($"  GC.Collect:       {mem.GcCollectCount} collections,  total stall {mem.GcCollectTotalNs / 1_000_000.0,6:F2} ms"));
         }
 
         private void WriteHealthSummary(HealthReport h)
@@ -229,8 +279,14 @@ namespace VanillaProfiler.Output
 
         private void CloseWriter()
         {
-            m_Writer?.Dispose();
-            m_Writer = null;
+            try
+            {
+                m_Writer?.Dispose();
+            }
+            finally
+            {
+                m_Writer = null;
+            }
         }
 
         private void WarnIoFailure(string operation, Exception ex)
@@ -246,8 +302,8 @@ namespace VanillaProfiler.Output
             Directory.CreateDirectory(m_LogDir);
             string path = Path.Combine(m_LogDir, LOG_FILENAME);
             var mode = m_TruncateOnNextOpen ? FileMode.Create : FileMode.Append;
-            m_TruncateOnNextOpen = false;
             var stream = new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite);
+            m_TruncateOnNextOpen = false;
             var writer = new StreamWriter(stream) { AutoFlush = true };
             writer.WriteLine();
             writer.WriteLine(Inv($"=== Vanilla Profiler session === {DateTime.Now:yyyy-MM-dd HH:mm:ss}"));
@@ -264,5 +320,11 @@ namespace VanillaProfiler.Output
         }
 
         private static string Inv(FormattableString value) => FormattableString.Invariant(value);
+
+        public static string GetLogDirectory(string persistentDataPath)
+            => Path.Combine(persistentDataPath, LOG_DIR_NAME);
+
+        public static string GetLogPath(string persistentDataPath)
+            => Path.Combine(GetLogDirectory(persistentDataPath), LOG_FILENAME);
     }
 }

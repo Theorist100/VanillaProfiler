@@ -66,17 +66,13 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.4.0" />
+  <ModVersion Value="1.4.1" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>v1.4.0 — sync-point detection and accurate measurement scope
-- Per-system numbers now labelled as main-thread cost: scheduling overhead, sync points, structural changes, ECB playback. Burst-compiled jobs running on worker threads are not captured — for per-job analysis use Unity Profiler.
-- New: sync-point detection. Per-system Update() calls above SyncPointThresholdMs (default 0.5 ms) are flagged as "[likely sync point]" in the log — these are the real main-thread bottlenecks worth investigating.
-- New: ECB.Playback timing. EntityCommandBuffer playback is always main-thread and is now timed separately under Phases.
-- New: aggregate worker-thread metrics. When the build exposes the markers, "Job workers" line shows total job execution time and main-thread wait-on-workers per frame (no per-system attribution).
-- Renamed report fields: "Top Systems" / "System Time" → "Top Main-Thread Systems" / "Main-Thread Cost" to match what is actually measured.
-- Removed GC garbage from MemorySampler and report-builder hot paths (pooled sort buffers, reused ProfilerRecorderSample buffer).
-- Log file is now truncated at every game start instead of growing indefinitely — keeps VanillaProfiler.log focused on the current session, never balloons across runs.</ChangeLog>
+  <ChangeLog>Fixed GC count: per-window delta instead of cumulative ring
+New Recommendations mode + settings polish
+Present Wait detection — CPU-paced vs GPU-bound diagnosis
+New Engine overlay: DrawCalls, SetPass, Tris/Verts, Shadows, GPU memory breakdown</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

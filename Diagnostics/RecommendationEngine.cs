@@ -5,7 +5,7 @@ namespace VanillaProfiler.Diagnostics
     /// <summary>
     /// Picks a short ordered list of player-actionable fixes based on the latest
     /// HealthReport and OverlaySnapshot. Pure function: no I/O, no statics, no
-    /// per-frame cost — invoked once per report window (~5s) by the overlay.
+    /// no I/O after the lazy graphics probe, and cheap enough for overlay layout/draw.
     ///
     /// Recommendations are sourced from Paradox's official "Optimizing Performance"
     /// guide and from CS2 community testing (PC Gamer / cs2performance.com /
@@ -149,9 +149,6 @@ namespace VanillaProfiler.Diagnostics
 
         private const double HEAVY_MOD_MS = 30.0;
         private const string PROFILER_MOD_NAME = "VanillaProfiler";
-
-        private static string ProbedReason(bool probedKnown, string knownText, string fallbackText)
-            => probedKnown ? knownText : fallbackText;
 
         private static (string ModName, double TotalMs)? HeaviestNonProfilerMod(OverlaySnapshot snap)
         {

@@ -14,6 +14,9 @@ namespace VanillaProfiler
     ///
     /// SystemBase.Update is invoked sequentially from ComponentSystemGroup.UpdateAllSystems on
     /// the main thread. Harmony Postfix runs on the same thread, so plain dictionaries are enough.
+    /// Stopwatch is the only timing source — ProfilerMarker.Begin/End would only be visible to
+    /// subscribers, and CS2 ships with Profiler.enabled=false (no subscriber). See
+    /// Docs/Reference/API/CS2_Profiling_API.md "What you can NOT do from a mod".
     /// </summary>
     [HarmonyPatch(typeof(SystemBase), nameof(SystemBase.Update))]
     public static class SystemAutoProfiler
@@ -24,6 +27,18 @@ namespace VanillaProfiler
             public bool IsVanilla;
             public string ModName;
         }
+
+        // Per-call state carried via Harmony __state. Must survive nested SystemBase.Update
+        // invocations — vanilla CS2 nests these calls (ReplacePrefabSystem.FinalizeReplaces,
+        // HeatmapPreviewSystem.OnUpdate, PhotoModeRenderSystem all run other systems' Update
+        // synchronously inside their own OnUpdate). Each (Prefix, Postfix) pair gets its
+        // own __state instance, so nesting is intrinsically safe.
+#pragma warning disable CA1815
+        public struct UpdateState
+        {
+            public long StartTicks;
+        }
+#pragma warning restore CA1815
 
         private static readonly Dictionary<Type, SystemInfo> s_Cache = new();
 
@@ -47,18 +62,31 @@ namespace VanillaProfiler
         }
 
         [HarmonyPrefix]
-        public static void Prefix(out long __state)
+        public static void Prefix(out UpdateState __state)
         {
-            __state = Stopwatch.GetTimestamp();
+            __state.StartTicks = Stopwatch.GetTimestamp();
         }
 
         [HarmonyPostfix]
-        public static void Postfix(SystemBase __instance, long __state)
+        public static void Postfix(SystemBase __instance, UpdateState __state)
+        {
+            Complete(__instance, __state);
+        }
+
+        [HarmonyFinalizer]
+        public static Exception Finalizer(SystemBase __instance, UpdateState __state, Exception __exception)
+        {
+            if (__exception != null)
+                Complete(__instance, __state);
+            return __exception;
+        }
+
+        private static void Complete(SystemBase __instance, UpdateState __state)
         {
             try
             {
                 MainThreadGuard.AssertMainThread(nameof(Postfix));
-                long elapsed = Stopwatch.GetTimestamp() - __state;
+                long elapsed = Stopwatch.GetTimestamp() - __state.StartTicks;
                 var type = __instance.GetType();
 
                 if (!s_Cache.TryGetValue(type, out var info))
@@ -76,13 +104,16 @@ namespace VanillaProfiler
         private static SystemInfo BuildInfo(Type type)
         {
             string modName = ModAttribution.Resolve(type);
+            string name = string.IsNullOrEmpty(type.FullName)
+                ? (string.IsNullOrEmpty(type.Name) ? "<anonymous>" : type.Name)
+                : type.FullName;
 
             // Profiler systems used to be skipped here; include them so the player
             // can see how much VanillaProfiler itself costs and confirm it's not
             // making things worse than the mod they're trying to diagnose.
             return new SystemInfo
             {
-                Name = string.IsNullOrEmpty(type.Name) ? "<anonymous>" : type.Name,
+                Name = name,
                 IsVanilla = modName == ModAttribution.VANILLA,
                 ModName = modName,
             };

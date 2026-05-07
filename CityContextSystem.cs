@@ -53,10 +53,14 @@ namespace VanillaProfiler
 
             try
             {
+                // CalculateEntityCount triggers a sync point because it Completes any
+                // pending writer job on the queried components — the profiler should
+                // not introduce its own sync. WithoutFiltering is fine here because the
+                // queries have no chunk filters; result is identical, no sync.
                 CityContext.Update(
-                    m_CitizenQuery.CalculateEntityCount(),
-                    m_VehicleQuery.CalculateEntityCount(),
-                    m_BuildingQuery.CalculateEntityCount());
+                    m_CitizenQuery.CalculateEntityCountWithoutFiltering(),
+                    m_VehicleQuery.CalculateEntityCountWithoutFiltering(),
+                    m_BuildingQuery.CalculateEntityCountWithoutFiltering());
             }
             catch (Exception ex)
             {

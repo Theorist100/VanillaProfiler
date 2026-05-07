@@ -18,8 +18,12 @@ namespace VanillaProfiler.Aggregation
         private int m_Spikes20;
 
         // Cached sync-point threshold in Stopwatch ticks. Refreshed on Drain so a
-        // settings change picks up at the next reporting window.
-        private long m_SyncPointTickThreshold = ComputeSyncPointTicks(0.5f);
+        // settings change picks up at the next reporting window. Initial value reads
+        // from SettingsStore so the very first report window already honours the
+        // user's configured threshold (was hardcoded 0.5f, ignoring SettingsStore for
+        // the first ~5 seconds of every session).
+        private long m_SyncPointTickThreshold = ComputeSyncPointTicks(
+            SettingsStore.Current.SyncPointThresholdMs);
 
         private Dictionary<string, PhaseData> m_Phases = new();
         private Dictionary<string, PhaseData> m_VanillaSystems = new();

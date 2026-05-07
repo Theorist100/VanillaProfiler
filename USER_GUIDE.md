@@ -18,7 +18,7 @@ All shortcuts use **Ctrl + F-key** so they don't collide with vanilla Cities: Sk
 |---|---|
 | **Ctrl+F7** | Toggle spike screenshots (auto-capture on frames over threshold) |
 | **Ctrl+F8** | Open / close settings panel |
-| **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Details → Hidden |
+| **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Tips → Details → Engine → Hidden |
 | **Ctrl+F10** | Force an immediate report dump to `VanillaProfiler.log` |
 | **Ctrl+F11** | Export full diagnostic report (support file) to `Reports/CSII_Report_*.txt` |
 | **Ctrl+F12** | Cycle overlay position: Top-Left → Top-Right → Bottom-Right → Bottom-Left |
@@ -58,8 +58,11 @@ TrafficLightsEnhancer
 3. If it repeats, press Ctrl+F11 and send the report.
 ```
 
+### Tips
+Actionable recommendations picked from the current health report and graphics settings.
+
 ### Details
-Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, GPU/CPU thread time, and city context. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
+Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, and city context. Per-thread CPU/GPU/PresentWait breakdown lives on the Engine screen instead. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
 
 ```
 VANILLA PROFILER  >  DETAILS
@@ -81,6 +84,34 @@ CITY    80k pop, 24k vehicles, 12k buildings
   ...
 Ctrl+F8 settings  •  Ctrl+F9 mode  •  Ctrl+F10 dump  •  Ctrl+F11 export  •  Ctrl+F12 move
 ```
+
+### Engine
+Raw Unity engine counters — frame timing, render counts, GPU memory breakdown, GC stalls. For diagnosing what *type* of bottleneck you have rather than which system caused it.
+
+```
+VANILLA PROFILER  >  ENGINE
+▸ Frame timing
+  CPU main:      35.32 ms
+  CPU render:     8.37 ms
+  GPU:           40.16 ms
+  Present wait:   0.05 ms  (0% of frame — GPU-bound when high)
+▸ Render counts
+  DrawCalls   5379   SetPass  440
+  Tris   55509K   Verts   78195K
+  Shadow casters: 3510
+▸ GPU memory
+  Used buffers:    625.9 MB  (8652 bufs)
+  Render targets: 2536.0 MB
+▸ GC
+  64 collections, total stall 29.63 ms
+Process RSS:    7906 MB
+```
+
+Reading guide:
+- **Present wait** is the real GPU-bound signal. >30 % of the frame ⇒ CPU sits idle waiting on the GPU; lowering graphics quality helps. Near-zero with high CPU main ⇒ CPU bottleneck, ECS is the place to optimise.
+- **SetPass** spike ⇒ shader-state churn (lots of material/keyword variance).
+- **GPU memory split** lets you tell a buffer leak from a render-target leak.
+- **GC stall** ⇒ how much frame time was lost to managed garbage collection in the window.
 
 ### Hidden
 Overlay disappears completely. Hotkeys still work. Toasts (e.g. "Support file created") still appear briefly at the bottom of the screen.

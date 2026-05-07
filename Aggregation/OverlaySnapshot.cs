@@ -35,11 +35,21 @@ namespace VanillaProfiler
         public double MainThreadCpuMs;
         public double RenderThreadCpuMs;
         public double GpuFrameTimeMs;
+        public double PresentWaitMs;
 
-        // Aggregate job worker time and main-thread wait-on-workers, when the
-        // ProfilerCategory.Internal markers are exposed by the build (often
-        // stripped in release). Zero when unavailable.
-        public double JobWorkerExecMs;
-        public double JobWorkerWaitMs;
+        // Render-pipeline counts and GPU memory breakdown surfaced by the new
+        // engine-counters set. All optional — a recorder stripped on this build
+        // simply leaves the field at 0.
+        public long DrawCalls;
+        public long SetPassCalls;
+        public long Triangles;
+        public long Vertices;
+        public long ShadowCasters;
+        public double UsedBuffersMB;
+        public long UsedBuffersCount;
+        public double RenderTexturesMB;
+        public double GcCollectStallMs;
+        public long GcCollectCount;
+        public double AppResidentMB;
     }
 }

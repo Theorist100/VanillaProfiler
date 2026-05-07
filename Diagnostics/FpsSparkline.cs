@@ -11,6 +11,12 @@ namespace VanillaProfiler.Diagnostics
     {
         private const int CAPACITY = 60;
         private const float SAMPLE_INTERVAL_S = 1.0f;
+        // Cap how many samples a single OnFrame call can push. A long pause (alt-tab,
+        // save load, multi-second GC) accumulates 30+ seconds before the next OnFrame,
+        // and without this cap the backfill loop would dump CAPACITY identical samples
+        // and wipe every prior FPS reading from the sparkline. Three is enough to
+        // visually mark "something paused here" without losing history.
+        private const int MAX_BACKFILL_SAMPLES = 3;
         // ▁▂▃▄▅▆▇█ — eight levels of fill
         private static readonly char[] BLOCKS = { '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█' };
 
@@ -35,14 +41,29 @@ namespace VanillaProfiler.Diagnostics
             if (m_AccumFrames <= 0) return;
 
             double fps = m_AccumSeconds > 0 ? m_AccumFrames / m_AccumSeconds : 0;
-            int samples = (int)m_AccumSeconds;
+            int wholeSamples = (int)(m_AccumSeconds / SAMPLE_INTERVAL_S);
+            int samples = wholeSamples;
             if (samples < 1) samples = 1;
-            if (samples > CAPACITY) samples = CAPACITY;
+            if (samples > MAX_BACKFILL_SAMPLES) samples = MAX_BACKFILL_SAMPLES;
             for (int i = 0; i < samples; i++)
                 Push(fps);
 
-            m_AccumSeconds = 0;
-            m_AccumFrames = 0;
+            if (wholeSamples > MAX_BACKFILL_SAMPLES)
+            {
+                m_AccumSeconds = 0;
+                m_AccumFrames = 0;
+                return;
+            }
+
+            float consumedSeconds = samples * SAMPLE_INTERVAL_S;
+            float totalSeconds = m_AccumSeconds;
+            m_AccumSeconds -= consumedSeconds;
+            if (m_AccumSeconds < 0) m_AccumSeconds = 0;
+            int consumedFrames = totalSeconds > 0
+                ? (int)System.Math.Round(m_AccumFrames * (consumedSeconds / totalSeconds))
+                : m_AccumFrames;
+            m_AccumFrames -= consumedFrames;
+            if (m_AccumFrames < 0) m_AccumFrames = 0;
         }
 
         public void Reset()
@@ -88,7 +109,7 @@ namespace VanillaProfiler.Diagnostics
             var sb = new StringBuilder(take);
             for (int i = skip; i < n; i++)
             {
-                double norm = range > 0 ? (m_Samples[i] - min) / range : 0;
+                double norm = (m_Samples[i] - min) / range;
                 int idx = rawRange < 0.001
                     ? BLOCKS.Length / 2
                     : (int)System.Math.Round(norm * (BLOCKS.Length - 1));

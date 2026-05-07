@@ -150,29 +150,67 @@ namespace VanillaProfiler.Diagnostics
             try
             {
                 if (count < 1) count = 1;
-                string path = Path.Combine(Application.persistentDataPath, "Logs", LogFileSink.LOG_FILENAME);
+                string path = LogFileSink.GetLogPath(Application.persistentDataPath);
                 if (!File.Exists(path))
                     return new[] { $"  ({LogFileSink.LOG_FILENAME} not found)" };
 
-                var ring = new string[count];
-                int seen = 0;
-                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (var reader = new StreamReader(stream))
+                const int CHUNK = 8192;
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                long length = stream.Length;
+                if (length == 0)
+                    return new[] { $"  ({LogFileSink.LOG_FILENAME} is empty)" };
+
+                var buffer = new byte[CHUNK];
+                long scanEnd = length;
+                stream.Position = length - 1;
+                if (stream.ReadByte() == '\n')
+                    scanEnd--;
+
+                long pos = scanEnd;
+                long startOffset = 0;
+                int newlines = 0;
+                while (pos > 0)
                 {
-                    string line;
-                    while ((line = reader.ReadLine()) != null)
+                    int readSize = (int)Math.Min(CHUNK, pos);
+                    pos -= readSize;
+                    stream.Position = pos;
+                    int read = stream.Read(buffer, 0, readSize);
+                    if (read <= 0) break;
+
+                    for (int i = read - 1; i >= 0; i--)
                     {
-                        ring[seen % count] = line;
-                        seen++;
+                        if (buffer[i] != (byte)'\n') continue;
+                        newlines++;
+                        if (newlines == count)
+                        {
+                            startOffset = pos + i + 1;
+                            pos = 0;
+                            break;
+                        }
                     }
                 }
 
-                int take = seen < count ? seen : count;
-                var result = new string[take];
-                int start = seen >= count ? seen % count : 0;
-                for (int i = 0; i < take; i++)
-                    result[i] = ring[(start + i) % count];
-                return result;
+                int byteCount = checked((int)(length - startOffset));
+                var bytes = new byte[byteCount];
+                stream.Position = startOffset;
+                int total = 0;
+                while (total < byteCount)
+                {
+                    int read = stream.Read(bytes, total, byteCount - total);
+                    if (read <= 0) break;
+                    total += read;
+                }
+
+                string text = Encoding.UTF8.GetString(bytes, 0, total);
+                var raw = text.Split('\n');
+                int lineCount = raw.Length;
+                if (lineCount > 0 && raw[lineCount - 1].Length == 0)
+                    lineCount--;
+                int first = Math.Max(0, lineCount - count);
+                var lines = new List<string>(lineCount - first);
+                for (int i = first; i < lineCount; i++)
+                    lines.Add(raw[i].TrimEnd('\r'));
+                return lines;
             }
             catch (Exception ex)
             {

@@ -86,7 +86,11 @@ namespace VanillaProfiler.Diagnostics
         {
             var ns = type.Namespace ?? string.Empty;
 
-            if (ns.StartsWith("VanillaProfiler", StringComparison.Ordinal))
+            // Use segment match for parity with IsVanilla / IsVanillaAssemblyName.
+            // Plain StartsWith("VanillaProfiler") would steal credit for any third-party
+            // mod whose namespace happens to start with the same string (e.g. a hypothetical
+            // VanillaProfilerHelper).
+            if (HasPrefixSegment(ns, "VanillaProfiler"))
                 return PROFILER;
 
             if (IsVanilla(type))
@@ -184,8 +188,21 @@ namespace VanillaProfiler.Diagnostics
                 || HasPrefixSegment(asmName, "Unity")
                 || HasPrefixSegment(asmName, "UnityEngine")
                 || HasPrefixSegment(asmName, "Colossal")
-                || HasPrefixSegment(asmName, "System")
+                || IsFrameworkSystemAssembly(asmName)
                 || string.Equals(asmName, "mscorlib", StringComparison.Ordinal);
+        }
+
+        private static bool IsFrameworkSystemAssembly(string asmName)
+        {
+            return string.Equals(asmName, "System", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Core", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Xml", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Xml.Linq", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Data", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Drawing", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Numerics", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.Runtime.Serialization", StringComparison.Ordinal)
+                || string.Equals(asmName, "System.IO.Compression.FileSystem", StringComparison.Ordinal);
         }
 
         private static bool HasPrefixSegment(string value, string prefix)

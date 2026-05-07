@@ -15,7 +15,18 @@ namespace VanillaProfiler.Overlay
             DrawBadge(theme, scale, "[Ctrl+F9] Profiler", theme.BodyStyle);
         }
 
-        /// <summary>Neutral no-city state badge — main menu, editor, or pre-game screens.</summary>
+        /// <summary>
+        /// Neutral no-city state badge — main menu, editor, or pre-game screens.
+        ///
+        /// INTENTIONALLY UNCALLED. Paradox Mods loads every mod assembly during
+        /// GameManager.Initialize, well before the player picks a save, so OnGUI runs
+        /// throughout splash + main menu. Rendering anything during NoCity puts a profiler
+        /// pill in front of every player on every launch — intrusive for the common case
+        /// where the user only wants to play, not measure. The method stays defined so a
+        /// future opt-in setting ("show standby badge in main menu") can wire it without a
+        /// rewrite. Do NOT wire this from ProfilerOverlay.DrawScaled unconditionally —
+        /// audit waves will keep flagging it as dead, but that's the correct state.
+        /// </summary>
         public static void DrawStandby(OverlayTheme theme, float scale)
         {
             DrawBadge(theme, scale,
@@ -41,8 +52,11 @@ namespace VanillaProfiler.Overlay
             float w = size.x + OverlayPanel.PAD * 2;
             float h = OverlayPanel.LINE_H + OverlayPanel.PAD;
             var (logicalW, _) = PanelLayout.LogicalSize(scale);
+            float maxW = Mathf.Max(0f, logicalW - OverlayPanel.MARGIN * 2);
+            if (w > maxW) w = maxW;
+            if (w <= 0f) return;
 
-            var rect = new Rect(logicalW - w - OverlayPanel.MARGIN, OverlayPanel.MARGIN, w, h);
+            var rect = new Rect(Mathf.Max(OverlayPanel.MARGIN, logicalW - w - OverlayPanel.MARGIN), OverlayPanel.MARGIN, w, h);
             OverlayPanel.DrawFrame(theme, rect);
             GUI.Label(
                 new Rect(rect.x + OverlayPanel.PAD, rect.y + OverlayPanel.PAD * 0.5f,

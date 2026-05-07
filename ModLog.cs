@@ -56,6 +56,14 @@ namespace VanillaProfiler
                 Route(p, level, msg);
         }
 
+        public static void ClearBuffer()
+        {
+            lock (s_Lock)
+            {
+                s_Buffer.Clear();
+            }
+        }
+
         private static void Route(Profiler p, SystemLogLevel level, string msg)
         {
             switch (level)

@@ -14,22 +14,19 @@ namespace VanillaProfiler.Diagnostics
     /// </summary>
     public static class HarmonyConflictDetector
     {
-        public static int LastConflictCount { get; private set; }
-
         public static void ScanAndLog(Profiler profiler)
         {
             if (profiler == null) return;
             try
             {
                 var conflicts = Detect();
-                LastConflictCount = conflicts.Count;
                 var sb = new StringBuilder();
                 sb.AppendLine();
-                sb.AppendLine($"HARMONY PATCHES SCAN  —  {conflicts.Count} potential conflicts");
+                sb.AppendLine($"HARMONY PATCHES SCAN  —  {conflicts.Count} VanillaProfiler patch conflicts");
                 sb.AppendLine(new string('─', 50));
                 if (conflicts.Count == 0)
                 {
-                    sb.AppendLine("  No multi-owner patches detected.");
+                    sb.AppendLine("  No VanillaProfiler-involved multi-owner patches detected.");
                     profiler.LogInfo(sb.ToString());
                     return;
                 }
@@ -66,9 +63,19 @@ namespace VanillaProfiler.Diagnostics
 
                 if (owners.Count < 2) continue;
 
+                // Only report conflicts where VanillaProfiler is one of the patchers.
+                // Otherwise PERF.log would shame third-party patch fights this mod can
+                // neither cause nor resolve, and players would mistake the noise as
+                // VanillaProfiler's fault. The comparison is case-sensitive against the
+                // canonical HARMONY_ID we register patches under.
+                if (!owners.Contains(VanillaProfilerMod.HARMONY_ID)) continue;
+
+                // Module-level methods (rare in C# but legal in IL) have null
+                // DeclaringType; render as "<global>" instead of a leading dot.
+                var typeName = method.DeclaringType?.FullName ?? "<global>";
                 result.Add(new ConflictEntry
                 {
-                    Method = $"{method.DeclaringType?.FullName}.{method.Name}",
+                    Method = $"{typeName}.{method.Name}",
                     Owners = owners.OrderBy(s => s, StringComparer.Ordinal).ToList(),
                 });
             }

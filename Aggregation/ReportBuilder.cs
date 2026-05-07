@@ -14,6 +14,8 @@ namespace VanillaProfiler.Aggregation
         private const double MS_PER_SEC = 1000.0;
         private const double BYTES_PER_MB = 1024.0 * 1024.0;
         private const int TOP_N = 5;
+        private const string SIM_PHASE_KEY = "UpdateSystem.GameSimulation";
+        private const string RENDER_PHASE_KEY = "UpdateSystem.Rendering";
 
         // Reused sort buffer. Build runs once per report (~5s) but the buffer is
         // reused across windows so a steady-state mod doesn't keep allocating
@@ -24,8 +26,8 @@ namespace VanillaProfiler.Aggregation
             MetricsSample metrics, MemorySample memory, MemoryHistory history)
         {
             var snapshot = BuildSnapshot(metrics, memory);
-            double simPhaseMs = SumPhaseMs(metrics.Phases, "GameSimulation", metrics.FrameCount);
-            double renderPhaseMs = SumPhaseMs(metrics.Phases, "Rendering", metrics.FrameCount);
+            double simPhaseMs = PhaseMs(metrics.Phases, SIM_PHASE_KEY, metrics.FrameCount);
+            double renderPhaseMs = PhaseMs(metrics.Phases, RENDER_PHASE_KEY, metrics.FrameCount);
             var health = HealthClassifier.Classify(snapshot, history, simPhaseMs, renderPhaseMs);
             return (snapshot, health);
         }
@@ -69,8 +71,18 @@ namespace VanillaProfiler.Aggregation
                 MainThreadCpuMs = mem.MainThreadCpuNs / 1_000_000.0,
                 RenderThreadCpuMs = mem.RenderThreadCpuNs / 1_000_000.0,
                 GpuFrameTimeMs = mem.GpuFrameTimeNs / 1_000_000.0,
-                JobWorkerExecMs = mem.JobWorkerTimeNs / 1_000_000.0,
-                JobWorkerWaitMs = mem.JobWorkerWaitNs / 1_000_000.0,
+                PresentWaitMs = mem.PresentWaitNs / 1_000_000.0,
+                DrawCalls = mem.DrawCallsCount,
+                SetPassCalls = mem.SetPassCallsCount,
+                Triangles = mem.TrianglesCount,
+                Vertices = mem.VerticesCount,
+                ShadowCasters = mem.ShadowCastersCount,
+                UsedBuffersMB = mem.UsedBuffersBytes / BYTES_PER_MB,
+                UsedBuffersCount = mem.UsedBuffersCount,
+                RenderTexturesMB = mem.RenderTexturesBytes / BYTES_PER_MB,
+                GcCollectStallMs = mem.GcCollectTotalNs / 1_000_000.0,
+                GcCollectCount = mem.GcCollectCount,
+                AppResidentMB = mem.AppResidentBytes / BYTES_PER_MB,
             };
         }
 
@@ -115,18 +127,12 @@ namespace VanillaProfiler.Aggregation
             return result;
         }
 
-        private static double SumPhaseMs(Dictionary<string, PhaseData> phases, string phaseName, int frameCount)
+        private static double PhaseMs(Dictionary<string, PhaseData> phases, string phaseKey, int frameCount)
         {
             if (frameCount <= 0) return 0;
-
-            string key = "UpdateSystem." + phaseName;
-            double total = 0;
-            foreach (var kvp in phases)
-            {
-                if (!string.Equals(kvp.Key, key, StringComparison.Ordinal)) continue;
-                total += kvp.Value.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
-            }
-            return total / frameCount;
+            return phases.TryGetValue(phaseKey, out var data)
+                ? data.TotalTicks * MS_PER_SEC / Stopwatch.Frequency / frameCount
+                : 0;
         }
     }
 }

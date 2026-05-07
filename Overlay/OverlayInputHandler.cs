@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Overlay
 {
@@ -19,11 +20,17 @@ namespace VanillaProfiler.Overlay
 
         public void Poll(bool settingsOpen)
         {
-            if (settingsOpen && GUIUtility.keyboardControl != 0) return;
             if (!CtrlHeld) return;
 
+            if (SettingsStore.Current.SettingsPanelHotkey && Input.GetKeyDown(KeyCode.F8))
+            {
+                OnToggleSettings?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (settingsOpen && GUIUtility.keyboardControl != 0) return;
+
             if (Input.GetKeyDown(KeyCode.F7)) OnToggleScreenshots?.Invoke(this, EventArgs.Empty);
-            if (Input.GetKeyDown(KeyCode.F8)) OnToggleSettings?.Invoke(this, EventArgs.Empty);
             if (Input.GetKeyDown(KeyCode.F9)) OnCycleMode?.Invoke(this, EventArgs.Empty);
             if (Input.GetKeyDown(KeyCode.F10)) OnForceDump?.Invoke(this, EventArgs.Empty);
             if (Input.GetKeyDown(KeyCode.F11)) OnExportReport?.Invoke(this, EventArgs.Empty);

@@ -12,7 +12,6 @@ namespace VanillaProfiler.Aggregation
         // Zero when the recorder is unavailable on a given platform/build.
         public long GfxUsedBytes;
         public long AudioUsedBytes;
-        public long VideoUsedBytes;
         public long SystemUsedBytes;
 
         public long ManagedDelta;
@@ -21,7 +20,6 @@ namespace VanillaProfiler.Aggregation
         public long NativeReservedDelta;
         public long GfxUsedDelta;
         public long AudioUsedDelta;
-        public long VideoUsedDelta;
 
         public double ManagedGrowthMBperSec;
         public bool BaselineJustCaptured;
@@ -30,12 +28,36 @@ namespace VanillaProfiler.Aggregation
         public long MainThreadCpuNs;
         public long RenderThreadCpuNs;
         public long GpuFrameTimeNs;
+        // CPU main-thread time spent waiting on the GPU swapchain — direct GPU-bound
+        // indicator. High PresentWait + low Main = GPU bottleneck, ECS optimisation
+        // does nothing for FPS.
+        public long PresentWaitNs;
 
-        // Aggregate job worker time per frame from ProfilerCategory.Internal markers,
-        // when exposed by the build. Zero when no marker is available.
-        // No per-system attribution — this is a "total work on workers this frame"
-        // honest stand-in for what Unity Profiler shows on its worker timeline.
-        public long JobWorkerTimeNs;
-        public long JobWorkerWaitNs;   // Time main thread spent waiting on workers (real sync cost).
+        // Per-frame render counts from ProfilerCategory.Render. Counts (not bytes/ns).
+        // Zero when the marker is stripped on this build.
+        public long DrawCallsCount;
+        public long SetPassCallsCount;
+        public long TrianglesCount;
+        public long VerticesCount;
+        // Number of shadow-casting renderers visible this frame. Sudden jumps reveal
+        // shadow-rendering load spikes (e.g. new prop pack with shadow-cast meshes).
+        public long ShadowCastersCount;
+
+        // GPU memory breakdown — splits the opaque "Gfx total" into buffers vs textures.
+        // Used Buffers grows with mesh/data uploads; Render Textures grows with
+        // framebuffer/RT allocation (overdraw, VFX trails).
+        public long UsedBuffersBytes;
+        public long UsedBuffersCount;
+        public long RenderTexturesBytes;
+
+        // GC.Collect total stall time over the report window + how many collections
+        // occurred. Distinguishes GC-induced stutter from non-GC main-thread stalls.
+        public long GcCollectTotalNs;
+        public long GcCollectCount;
+
+        // Process resident set (physical RAM actually held). Diverges from
+        // System Used Memory when the OS pages parts out under pressure — catches
+        // swap-thrash before a hard OOM crash.
+        public long AppResidentBytes;
     }
 }

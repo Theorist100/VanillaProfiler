@@ -129,12 +129,14 @@ namespace VanillaProfiler.Overlay
                 // Pre-build the variant tables so per-frame Style* calls just index into them.
                 m_HealthStyles = new[]
                 {
+                    BodyStyle,                  // Unknown
                     BuildColored(SUCCESS),     // Good
                     BuildColored(WARNING),     // Ok
                     BuildColored(ERROR_RED),   // Poor
                 };
                 m_BottleneckStyles = new[]
                 {
+                    BodyStyle,                  // Unknown
                     BodyStyle,                  // Balanced
                     BuildColored(WARNING),      // RenderBound
                     BuildColored(WARNING),      // SimBound

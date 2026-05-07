@@ -53,8 +53,19 @@ namespace VanillaProfiler.Output
             }
             catch (IOException) when (File.Exists(targetPath) && File.Exists(tmpPath))
             {
-                // Race: another writer created target between Exists and Move.
-                File.Replace(tmpPath, targetPath, backupPath);
+                // Race: another writer created target between Exists and Move. The retry
+                // can itself throw a different IOException (target locked by AV scan etc.);
+                // wrap so DeleteTempIfPresent in the finally block still runs and we don't
+                // leak the .tmp file. Caller's catch sees the original problem class.
+                try
+                {
+                    File.Replace(tmpPath, targetPath, backupPath);
+                }
+                catch (IOException)
+                {
+                    /* leave temp for outer cleanup */
+                    throw;
+                }
             }
         }
 

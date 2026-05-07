@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using VanillaProfiler.Diagnostics;
 
@@ -11,16 +12,16 @@ namespace VanillaProfiler.Overlay.Modes
     /// </summary>
     public sealed class RecommendationsMode : IOverlayMode
     {
+        private OverlaySnapshot m_CachedSnapshot;
+        private HealthReport m_CachedHealth;
+        private List<Recommendation> m_CachedPicks;
+
         public string DisplayName => "Tips";
         public bool IsHidden => false;
 
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
-            // Header (2) + section (1) + N entries × 3 lines + (N-1) spacers between.
-            // RecommendationEngine.Build is a pure function whose result is fully
-            // determined by the cached probe + snapshot, so calling it twice (here
-            // and in Draw) returns the same list with no extra side effects.
-            var picks = RecommendationEngine.Build(LastHealth(snapshot), snapshot);
+            var picks = Picks(snapshot, LastHealth());
             int lines = picks.Count == 0
                 ? 2 + 1 + 1               // header + ALL CLEAR + body
                 : 2 + 1 + (picks.Count * 3) + Math.Max(0, picks.Count - 1);
@@ -30,14 +31,14 @@ namespace VanillaProfiler.Overlay.Modes
         // The mode contract gives Draw both snapshot + health but MeasureHeight only
         // gets the snapshot. Health is recomputed each report cycle and exposed via
         // ProfilerHost; reading it here keeps the height in sync with what Draw uses.
-        private static HealthReport LastHealth(OverlaySnapshot snapshot)
+        private static HealthReport LastHealth()
             => ProfilerHost.TryGet()?.LastHealth;
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {
             OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  RECOMMENDATIONS");
 
-            var picks = RecommendationEngine.Build(health, snapshot);
+            var picks = Picks(snapshot, health);
             if (picks.Count == 0)
             {
                 OverlayPanel.DrawSection(ctx, "ALL CLEAR");
@@ -51,6 +52,19 @@ namespace VanillaProfiler.Overlay.Modes
                 if (i > 0) OverlayPanel.DrawLine(ctx, "", ctx.Theme.BodyStyle);
                 DrawEntry(ctx, i + 1, picks[i]);
             }
+        }
+
+        private List<Recommendation> Picks(OverlaySnapshot snapshot, HealthReport health)
+        {
+            if (m_CachedPicks != null
+                && ReferenceEquals(m_CachedSnapshot, snapshot)
+                && ReferenceEquals(m_CachedHealth, health))
+                return m_CachedPicks;
+
+            m_CachedSnapshot = snapshot;
+            m_CachedHealth = health;
+            m_CachedPicks = RecommendationEngine.Build(health, snapshot);
+            return m_CachedPicks;
         }
 
         private static void DrawEntry(DrawContext ctx, int index, Recommendation rec)

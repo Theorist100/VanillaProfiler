@@ -10,6 +10,13 @@ namespace VanillaProfiler.Overlay
     public static class SettingsDraft
     {
         /// <summary>Deep-copy a settings instance so edits don't mutate the live one.</summary>
+        /// <remarks>
+        /// Every public field on ProfilerSettings must be listed here. Missing a field means
+        /// SettingsPanel.Apply (which builds <c>merged = Clone(SettingsStore.Current)</c>
+        /// and only re-applies dirty fields) will silently revert that field to its
+        /// compile-time default on every Apply. SyncPointThresholdMs and ProfileVanillaSystems
+        /// were the original casualties — kept the list exhaustive after that bug.
+        /// </remarks>
         public static ProfilerSettings Clone(ProfilerSettings src) => new()
         {
             ReportIntervalSec = src.ReportIntervalSec,
@@ -18,7 +25,9 @@ namespace VanillaProfiler.Overlay
             SparklineWidth = src.SparklineWidth,
             SpikeScreenshots = src.SpikeScreenshots,
             SpikeThresholdMs = src.SpikeThresholdMs,
+            SyncPointThresholdMs = src.SyncPointThresholdMs,
             SettingsPanelHotkey = src.SettingsPanelHotkey,
+            ProfileVanillaSystems = src.ProfileVanillaSystems,
             UiScale = src.UiScale,
             PanelX = src.PanelX,
             PanelY = src.PanelY,

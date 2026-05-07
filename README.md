@@ -6,6 +6,8 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 
 - Status screen — Good / Warning / Problem with the likely cause and one-line advice
 - Diagnosis screen — plain-language explanation when something is wrong
+- Tips screen — prioritized settings and troubleshooting recommendations
+- Engine screen — raw Unity counters: per-thread frame timing (Main / Render / GPU / PresentWait), DrawCalls / SetPass / Tris / Verts / shadow casters, GPU memory split (buffers vs render targets), GC stalls, process RSS
 - Memory leak detector — flags sustained managed-heap growth across the recent window
 - Bottleneck verdict (RenderBound / SimBound / MemoryBound / Balanced) with concrete next step
 - Auto-screenshots on frame spikes
@@ -13,12 +15,12 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 
 ## For mod authors and power users
 
-- Details overlay — per-system main-thread cost (vanilla vs each mod), GPU/CPU/render-thread breakdown, FPS sparkline
+- Details overlay — per-system main-thread cost (vanilla vs each mod), FPS sparkline, top mods/systems
+- Engine overlay — raw Unity engine counters with PresentWait for honest GPU-bound detection (the "98% GPU" trap is documented in `Docs/Reference/API/CS2_Profiling_API.md`)
 - Sync-point flagging — Update() calls above SyncPointThresholdMs (default 0.5 ms) tagged `[likely sync point]` in the log; per-system suspect-call counter
 - ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
-- Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas
-- Aggregate worker-thread metrics when the build exposes them (CS2 release strips most; values stay 0 silently)
-- HarmonyConflictDetector — lists methods patched by more than one mod
+- Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas, render counts, GC stall sums
+- HarmonyConflictDetector — lists multi-owner Harmony patches that involve VanillaProfiler
 
 ## Scope of measurement
 
@@ -56,11 +58,12 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── MetricsAggregator.cs            Single-threaded accumulator with borrowed dictionaries
 │   ├── MetricsLease.cs                 Disposable owner for drained buffers (Recycle on dispose)
 │   ├── MetricsSample.cs                Drained data passed to ReportBuilder
-│   ├── MemorySampler.cs                Managed/native memory totals + managed growth
+│   ├── MemorySampler.cs                Managed/native memory + GPU breakdown + frame timing + GC stalls
 │   ├── MemorySample.cs                 Memory snapshot model
 │   ├── PhaseData.cs                    Per-key accumulator (total/max/calls)
 │   ├── ReportBuilder.cs                Pure (sample + memory + history) → snapshot + health
-│   └── OverlaySnapshot.cs              Immutable view exposed to overlay/exporter
+│   ├── OverlaySnapshot.cs              Immutable view exposed to overlay/exporter
+│   └── MarkerEnumerator.cs             One-shot dump of available ProfilerRecorder markers at startup
 ├── Output/
 │   ├── IReportSink.cs                  Interface for reporting destinations
 │   └── LogFileSink.cs                  Writes VanillaProfiler.log
@@ -84,14 +87,16 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │       ├── HiddenMode.cs               No-op mode
 │       ├── StatusMode.cs               Player-facing traffic light + likely cause
 │       ├── DiagnosisMode.cs            Plain-language explanation when Status is not Good
-│       └── DetailsMode.cs              Mod-author view: top mods, sparkline, system tables
+│       ├── RecommendationsMode.cs      Actionable Tips screen
+│       ├── DetailsMode.cs              Mod-author view: top mods, sparkline, system tables
+│       └── EngineMode.cs               Raw Unity engine counters (frame / render / GPU mem / GC)
 └── Diagnostics/
     ├── ModAttribution.cs               Type → ModName via IMod scan + assembly fallback
     ├── HealthClassifier.cs             GOOD/OK/POOR per metric + bottleneck verdict
     ├── MemoryHistory.cs                Rolling 60 s window, median delta leak detector
     ├── FpsSparkline.cs                 Unicode block chart of last 60 s of FPS
     ├── SpikeScreenshot.cs              Frame > threshold → ScreenCapture, throttled
-    ├── HarmonyConflictDetector.cs      Lists methods patched by >1 mod
+    ├── HarmonyConflictDetector.cs      Lists multi-owner patches involving VanillaProfiler
     ├── CityContext.cs                  Static snapshot of in-game entity counts
     ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt with system info & log tail
     ├── ProfilerSettings.cs             User-preferences DTO with Clamp() — no I/O of its own

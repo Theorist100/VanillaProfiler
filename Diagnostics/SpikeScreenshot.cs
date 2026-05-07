@@ -23,6 +23,7 @@ namespace VanillaProfiler.Diagnostics
 
         private static float s_LastCaptureRealtime = float.NegativeInfinity;
         private static int s_TotalCaptured;
+        private static int s_SessionSerial;
         private static string s_OutputDir;
         private static bool s_DirChecked;
 
@@ -38,10 +39,14 @@ namespace VanillaProfiler.Diagnostics
             try
             {
                 EnsureDir();
-                if (s_OutputDir == null) return;
+                if (s_OutputDir == null)
+                {
+                    s_LastCaptureRealtime = now;
+                    return;
+                }
 
                 int captureNumber = s_TotalCaptured + 1;
-                string fileName = $"spike_{DateTime.Now:yyyyMMdd_HHmmss}_{captureNumber:000}_{frameMs:F0}ms.png";
+                string fileName = $"spike_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{s_SessionSerial:00}_{captureNumber:000}_{frameMs:F0}ms.png";
                 string fullPath = Path.Combine(s_OutputDir, fileName);
                 ScreenCapture.CaptureScreenshot(fullPath);
                 s_LastCaptureRealtime = now;
@@ -60,6 +65,7 @@ namespace VanillaProfiler.Diagnostics
         {
             s_LastCaptureRealtime = float.NegativeInfinity;
             s_TotalCaptured = 0;
+            s_SessionSerial = (s_SessionSerial + 1) % 100;
             s_OutputDir = null;
             s_DirChecked = false;
         }
