@@ -30,5 +30,12 @@ namespace VanillaProfiler.Aggregation
         public long MainThreadCpuNs;
         public long RenderThreadCpuNs;
         public long GpuFrameTimeNs;
+
+        // Aggregate job worker time per frame from ProfilerCategory.Internal markers,
+        // when exposed by the build. Zero when no marker is available.
+        // No per-system attribution — this is a "total work on workers this frame"
+        // honest stand-in for what Unity Profiler shows on its worker timeline.
+        public long JobWorkerTimeNs;
+        public long JobWorkerWaitNs;   // Time main thread spent waiting on workers (real sync cost).
     }
 }

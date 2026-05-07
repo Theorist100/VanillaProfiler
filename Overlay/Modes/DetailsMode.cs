@@ -73,9 +73,9 @@ namespace VanillaProfiler.Overlay.Modes
                     $"City:          {OverlayFormat.Count(CityContext.Citizens)} pop, {OverlayFormat.Count(CityContext.Vehicles)} vehicles, {OverlayFormat.Count(CityContext.Buildings)} buildings",
                     ctx.Theme.DimStyle);
 
-            DrawTopList(ctx, "Top mods (by total ms in sample)", snapshot.TopMods);
-            DrawTopList(ctx, "Top vanilla systems", snapshot.TopVanillaSystems);
-            DrawTopList(ctx, "Top mod systems", snapshot.TopModSystems);
+            DrawTopList(ctx, "Top mods (main-thread ms in sample)", snapshot.TopMods);
+            DrawTopList(ctx, "Top vanilla systems (main-thread cost)", snapshot.TopVanillaSystems);
+            DrawTopList(ctx, "Top mod systems (main-thread cost)", snapshot.TopModSystems);
         }
 
         private static void DrawTopList(DrawContext ctx, string title, (string Name, double TotalMs)[] items)

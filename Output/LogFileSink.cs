@@ -25,6 +25,15 @@ namespace VanillaProfiler.Output
         private DateTime m_LastIoFailureLogUtc = DateTime.MinValue;
         private DateTime m_NextOpenRetryUtc = DateTime.MinValue;
 
+        // Truncate the log on the first successful open of the session, then append
+        // for the rest of the run. Without this, every session adds tens of MB to a
+        // file that nobody trims and the log balloons over time. Subsequent reopens
+        // after an IO failure must NOT truncate — that would erase the current run.
+        private bool m_TruncateOnNextOpen = true;
+
+        // Reused across reports to avoid one List allocation per phase/system table.
+        private readonly List<KeyValuePair<string, PhaseData>> m_SortBuffer = new();
+
         public LogFileSink(string logDir)
         {
             m_LogDir = logDir;
@@ -67,9 +76,9 @@ namespace VanillaProfiler.Output
             }
 
             WritePhaseTable(metrics.Phases);
-            WriteSystemTable("TOP MODS (by total CPU time)", metrics.ModAggregate, 10);
-            WriteSystemTable("VANILLA SYSTEMS (top 15)", metrics.VanillaSystems, 15);
-            WriteSystemTable("MOD SYSTEMS (top 15)", metrics.ModSystems, 15);
+            WriteSystemTable("TOP MODS (by main-thread time)", metrics.ModAggregate, 10);
+            WriteSystemTable("VANILLA SYSTEMS — main-thread cost (top 15)", metrics.VanillaSystems, 15);
+            WriteSystemTable("MOD SYSTEMS — main-thread cost (top 15)", metrics.ModSystems, 15);
             WriteMemorySection(memory);
             WriteHealthSummary(health);
         }
@@ -97,40 +106,47 @@ namespace VanillaProfiler.Output
         private void WritePhaseTable(Dictionary<string, PhaseData> phases)
         {
             if (phases.Count == 0) return;
-            var sorted = new List<KeyValuePair<string, PhaseData>>(phases);
-            sorted.Sort((a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
+            m_SortBuffer.Clear();
+            foreach (var kvp in phases) m_SortBuffer.Add(kvp);
+            m_SortBuffer.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
             WriteLine("");
-            WriteLine($"{"PHASE",-35} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8}");
-            WriteLine(new string('─', 72));
-            foreach (var kvp in sorted)
+            WriteLine($"{"PHASE",-35} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
+            WriteLine(new string('─', 79));
+            for (int i = 0; i < m_SortBuffer.Count; i++)
             {
+                var kvp = m_SortBuffer[i];
                 var d = kvp.Value;
                 double totalMs = d.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
                 double avgMs = d.CallCount > 0 ? totalMs / d.CallCount : 0;
                 double maxMs = d.MaxTicks * MS_PER_SEC / Stopwatch.Frequency;
-                WriteLine(Inv($"{kvp.Key,-35} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms"));
+                WriteLine(Inv($"{kvp.Key,-35} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}"));
             }
         }
 
         private void WriteSystemTable(string header, Dictionary<string, PhaseData> systems, int maxRows)
         {
             if (systems.Count == 0) return;
-            var sorted = new List<KeyValuePair<string, PhaseData>>(systems);
-            sorted.Sort((a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
+            m_SortBuffer.Clear();
+            foreach (var kvp in systems) m_SortBuffer.Add(kvp);
+            m_SortBuffer.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
             WriteLine("");
             WriteLine(header);
-            WriteLine($"{"SYSTEM",-45} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8}");
-            WriteLine(new string('─', 82));
+            // SYNC? column = number of individual Update() calls > SyncPointThresholdMs.
+            // A non-zero value means the system did real main-thread work (sync point,
+            // structural change, ECB playback, synchronous foreach), not just scheduling.
+            WriteLine($"{"SYSTEM",-45} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
+            WriteLine(new string('─', 89));
             int shown = 0;
-            foreach (var kvp in sorted)
+            for (int i = 0; i < m_SortBuffer.Count && shown < maxRows; i++)
             {
-                if (shown >= maxRows) break;
+                var kvp = m_SortBuffer[i];
                 var d = kvp.Value;
                 double totalMs = d.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
                 if (totalMs < 0.5) continue;
                 double avgMs = d.CallCount > 0 ? totalMs / d.CallCount : 0;
                 double maxMs = d.MaxTicks * MS_PER_SEC / Stopwatch.Frequency;
-                WriteLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms"));
+                string flag = d.SyncPointSuspectCount > 0 ? "  [likely sync point]" : "";
+                WriteLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}{flag}"));
                 shown++;
             }
         }
@@ -174,6 +190,8 @@ namespace VanillaProfiler.Output
                 WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.MainThreadCpuNs > 0 || mem.RenderThreadCpuNs > 0)
                 WriteLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
+            if (mem.JobWorkerTimeNs > 0 || mem.JobWorkerWaitNs > 0)
+                WriteLine(Inv($"  Job workers:      Exec {mem.JobWorkerTimeNs / 1_000_000.0,5:F2} ms aggregate,  MainWait {mem.JobWorkerWaitNs / 1_000_000.0,5:F2} ms  (no per-system attribution)"));
         }
 
         private void WriteHealthSummary(HealthReport h)
@@ -227,11 +245,20 @@ namespace VanillaProfiler.Output
         {
             Directory.CreateDirectory(m_LogDir);
             string path = Path.Combine(m_LogDir, LOG_FILENAME);
-            var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            var mode = m_TruncateOnNextOpen ? FileMode.Create : FileMode.Append;
+            m_TruncateOnNextOpen = false;
+            var stream = new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite);
             var writer = new StreamWriter(stream) { AutoFlush = true };
             writer.WriteLine();
             writer.WriteLine(Inv($"=== Vanilla Profiler session === {DateTime.Now:yyyy-MM-dd HH:mm:ss}"));
             writer.WriteLine(Inv($"Report interval: {SettingsStore.Current.ReportIntervalSec}s"));
+            writer.WriteLine();
+            writer.WriteLine("NOTE on per-system numbers below:");
+            writer.WriteLine("  These reflect main-thread cost only — scheduling overhead, sync points,");
+            writer.WriteLine("  structural changes, ECB playback, and any work done synchronously on the");
+            writer.WriteLine("  main thread. Job execution on worker threads is NOT captured here, because");
+            writer.WriteLine("  Burst-compiled jobs run outside of SystemBase.Update(). For accurate");
+            writer.WriteLine("  per-job profiling attach Unity Profiler to the running game.");
             writer.WriteLine();
             return writer;
         }

@@ -15,6 +15,11 @@ namespace VanillaProfiler.Aggregation
         private const double BYTES_PER_MB = 1024.0 * 1024.0;
         private const int TOP_N = 5;
 
+        // Reused sort buffer. Build runs once per report (~5s) but the buffer is
+        // reused across windows so a steady-state mod doesn't keep allocating
+        // List<KeyValuePair> instances.
+        private readonly List<KeyValuePair<string, PhaseData>> m_SortBuffer = new();
+
         public (OverlaySnapshot snapshot, HealthReport health) Build(
             MetricsSample metrics, MemorySample memory, MemoryHistory history)
         {
@@ -25,7 +30,7 @@ namespace VanillaProfiler.Aggregation
             return (snapshot, health);
         }
 
-        private static OverlaySnapshot BuildSnapshot(MetricsSample m, MemorySample mem)
+        private OverlaySnapshot BuildSnapshot(MetricsSample m, MemorySample mem)
         {
             double avgFrameMs = 0, maxFrameMs = 0, avgFps = 0, minFps = 0, simPerSec = 0;
             if (m.FrameCount > 0)
@@ -64,6 +69,8 @@ namespace VanillaProfiler.Aggregation
                 MainThreadCpuMs = mem.MainThreadCpuNs / 1_000_000.0,
                 RenderThreadCpuMs = mem.RenderThreadCpuNs / 1_000_000.0,
                 GpuFrameTimeMs = mem.GpuFrameTimeNs / 1_000_000.0,
+                JobWorkerExecMs = mem.JobWorkerTimeNs / 1_000_000.0,
+                JobWorkerWaitMs = mem.JobWorkerWaitNs / 1_000_000.0,
             };
         }
 
@@ -79,19 +86,33 @@ namespace VanillaProfiler.Aggregation
             return (perFrameMs, pct);
         }
 
-        private static (string, double)[] BuildTop(Dictionary<string, PhaseData> systems, int n)
+        private (string, double)[] BuildTop(Dictionary<string, PhaseData> systems, int n)
         {
-            var sorted = new List<KeyValuePair<string, PhaseData>>(systems);
-            sorted.Sort((a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
-            var result = new List<(string, double)>(n);
-            foreach (var kvp in sorted)
+            m_SortBuffer.Clear();
+            foreach (var kvp in systems) m_SortBuffer.Add(kvp);
+            m_SortBuffer.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
+
+            // Walk in order, count how many will pass the 0.1ms cutoff up to n,
+            // then allocate the exact-size result array. Avoids the List → ToArray
+            // double allocation.
+            int take = 0;
+            for (int i = 0; i < m_SortBuffer.Count && take < n; i++)
             {
-                if (result.Count >= n) break;
-                double ms = kvp.Value.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
+                double ms = m_SortBuffer[i].Value.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
                 if (ms < 0.1) break;
-                result.Add((kvp.Key, ms));
+                take++;
             }
-            return result.ToArray();
+
+            if (take == 0) return Array.Empty<(string, double)>();
+
+            var result = new (string, double)[take];
+            for (int i = 0; i < take; i++)
+            {
+                var kvp = m_SortBuffer[i];
+                double ms = kvp.Value.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
+                result[i] = (kvp.Key, ms);
+            }
+            return result;
         }
 
         private static double SumPhaseMs(Dictionary<string, PhaseData> phases, string phaseName, int frameCount)

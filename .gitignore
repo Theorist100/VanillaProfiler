@@ -70,3 +70,4 @@ local/
 *.local.*
 CLAUDE.md
 tmpclaude-*
+build_out.txt

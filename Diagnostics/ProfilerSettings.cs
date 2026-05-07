@@ -27,6 +27,11 @@ namespace VanillaProfiler.Diagnostics
         public bool SpikeScreenshots = true;
         public float SpikeThresholdMs = 100.0f;
 
+        // Per-system Update() call duration (ms) above which the call is flagged as a
+        // suspected sync point. Default 0.5 ms is well above pure scheduling overhead
+        // (~0.01 ms) but below most real main-thread work. Tunable when investigating.
+        public float SyncPointThresholdMs = 0.5f;
+
         public bool SettingsPanelHotkey = true;
 
         // Profile every vanilla SystemBase.Update via Harmony patch. Off by default
@@ -61,6 +66,11 @@ namespace VanillaProfiler.Diagnostics
                 changed |= Set(ref SpikeThresholdMs, 100f);
             if (SpikeThresholdMs < 33f) changed |= Set(ref SpikeThresholdMs, 33f);
             if (SpikeThresholdMs > 1000f) changed |= Set(ref SpikeThresholdMs, 1000f);
+
+            if (float.IsNaN(SyncPointThresholdMs) || float.IsInfinity(SyncPointThresholdMs))
+                changed |= Set(ref SyncPointThresholdMs, 0.5f);
+            if (SyncPointThresholdMs < 0.05f) changed |= Set(ref SyncPointThresholdMs, 0.05f);
+            if (SyncPointThresholdMs > 10f) changed |= Set(ref SyncPointThresholdMs, 10f);
 
             if (float.IsNaN(UiScale) || float.IsInfinity(UiScale))
                 changed |= Set(ref UiScale, 0f);

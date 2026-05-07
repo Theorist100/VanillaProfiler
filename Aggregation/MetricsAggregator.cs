@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Aggregation
 {
@@ -15,6 +16,10 @@ namespace VanillaProfiler.Aggregation
         private int m_SimTickCount;
         private int m_Spikes30;
         private int m_Spikes20;
+
+        // Cached sync-point threshold in Stopwatch ticks. Refreshed on Drain so a
+        // settings change picks up at the next reporting window.
+        private long m_SyncPointTickThreshold = ComputeSyncPointTicks(0.5f);
 
         private Dictionary<string, PhaseData> m_Phases = new();
         private Dictionary<string, PhaseData> m_VanillaSystems = new();
@@ -43,20 +48,24 @@ namespace VanillaProfiler.Aggregation
 
         public void RecordPhase(string name, long ticks)
         {
-            Add(m_Phases, name, ticks);
+            Add(m_Phases, name, ticks, m_SyncPointTickThreshold);
         }
 
         public void RecordSystem(string name, long ticks, bool isVanilla, string modName)
         {
             var dict = isVanilla ? m_VanillaSystems : m_ModSystems;
-            Add(dict, name, ticks);
+            Add(dict, name, ticks, m_SyncPointTickThreshold);
             if (!isVanilla && !string.IsNullOrEmpty(modName))
-                Add(m_ModAggregate, modName, ticks);
+                Add(m_ModAggregate, modName, ticks, m_SyncPointTickThreshold);
         }
 
         /// <summary>Swaps out accumulated state; dispose the lease to return buffers.</summary>
         public MetricsLease Drain()
         {
+            // Pick up settings changes (e.g. SyncPointThresholdMs) once per window
+            // rather than on every hot-path Add call.
+            m_SyncPointTickThreshold = ComputeSyncPointTicks(SettingsStore.Current.SyncPointThresholdMs);
+
             long frameTimeSum = m_FrameTimeSum;
             long frameTimeMax = m_FrameTimeMax;
             int frameCount = m_FrameCount;
@@ -116,7 +125,7 @@ namespace VanillaProfiler.Aggregation
             m_SpareModAggregate?.Clear();
         }
 
-        private static void Add(Dictionary<string, PhaseData> dict, string key, long ticks)
+        private static void Add(Dictionary<string, PhaseData> dict, string key, long ticks, long syncPointTickThreshold)
         {
             if (!dict.TryGetValue(key, out var data))
             {
@@ -126,6 +135,14 @@ namespace VanillaProfiler.Aggregation
             data.TotalTicks += ticks;
             data.CallCount++;
             if (ticks > data.MaxTicks) data.MaxTicks = ticks;
+            if (ticks >= syncPointTickThreshold) data.SyncPointSuspectCount++;
+        }
+
+        private static long ComputeSyncPointTicks(float thresholdMs)
+        {
+            // Stopwatch.Frequency is hardware-constant and >= 1; safe to multiply.
+            long ticks = (long)(Stopwatch.Frequency * (thresholdMs / 1000.0));
+            return ticks > 0 ? ticks : 1;
         }
 
         private void ResetCounters()

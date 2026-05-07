@@ -35,5 +35,11 @@ namespace VanillaProfiler
         public double MainThreadCpuMs;
         public double RenderThreadCpuMs;
         public double GpuFrameTimeMs;
+
+        // Aggregate job worker time and main-thread wait-on-workers, when the
+        // ProfilerCategory.Internal markers are exposed by the build (often
+        // stripped in release). Zero when unavailable.
+        public double JobWorkerExecMs;
+        public double JobWorkerWaitMs;
     }
 }

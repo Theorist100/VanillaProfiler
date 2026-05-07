@@ -36,6 +36,18 @@ namespace VanillaProfiler.Aggregation
         private ProfilerRecorder m_MainThreadRecorder;    // CPU Main Thread Frame Time (game logic)
         private ProfilerRecorder m_RenderThreadRecorder;  // CPU Render Thread Frame Time (render submission)
         private ProfilerRecorder m_GpuFrameTimeRecorder;  // GPU Frame Time (actual hardware time)
+        // Aggregate worker-thread job stats — speculative, marker availability depends
+        // on Unity build flags. We try several common names, surface whichever is
+        // exposed, and silently report 0 when none are valid.
+        private ProfilerRecorder m_WorkerTimeRecorder;    // sum of job execution time on workers (ns)
+        private ProfilerRecorder m_WorkerWaitRecorder;    // main-thread wait on workers (ns) = real sync cost
+
+        // Reusable buffer for ProfilerRecorder.CopyTo. The Unity API on this build
+        // only accepts List<ProfilerRecorderSample>, so we keep one instance and
+        // Clear() it before each fill — Clear preserves the underlying capacity, so
+        // steady-state sampling allocates nothing once the list grows to the largest
+        // recorder we read (capacity 15 for the Render-category recorders).
+        private readonly List<ProfilerRecorderSample> m_SampleBuffer = new(16);
 
         public long BaselineManaged => m_BaselineManaged;
         public long BaselineMonoHeap => m_BaselineMonoHeap;
@@ -59,6 +71,12 @@ namespace VanillaProfiler.Aggregation
             m_RenderThreadRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time", 15);
             m_GpuFrameTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "GPU Frame Time", 15);
 
+            // Speculative — these markers exist in development builds but are often
+            // stripped in release. ProfilerRecorder is safe to start even when the
+            // marker is absent: .Valid stays false and reads return 0.
+            m_WorkerTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "JobsParallelFor.Execute", 15);
+            m_WorkerWaitRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "WaitForJobGroupID", 15);
+
             ModLog.Info(
                 "ProfilerRecorder validity: " +
                 $"Video={m_VideoMemoryRecorder.Valid} " +
@@ -66,7 +84,9 @@ namespace VanillaProfiler.Aggregation
                 $"System={m_SystemUsedRecorder.Valid} " +
                 $"Main={m_MainThreadRecorder.Valid} " +
                 $"Render={m_RenderThreadRecorder.Valid} " +
-                $"GPU={m_GpuFrameTimeRecorder.Valid}");
+                $"GPU={m_GpuFrameTimeRecorder.Valid} " +
+                $"WorkerExec={m_WorkerTimeRecorder.Valid} " +
+                $"WorkerWait={m_WorkerWaitRecorder.Valid}");
         }
 
         public void Dispose()
@@ -77,6 +97,8 @@ namespace VanillaProfiler.Aggregation
             if (m_MainThreadRecorder.Valid) m_MainThreadRecorder.Dispose();
             if (m_RenderThreadRecorder.Valid) m_RenderThreadRecorder.Dispose();
             if (m_GpuFrameTimeRecorder.Valid) m_GpuFrameTimeRecorder.Dispose();
+            if (m_WorkerTimeRecorder.Valid) m_WorkerTimeRecorder.Dispose();
+            if (m_WorkerWaitRecorder.Valid) m_WorkerWaitRecorder.Dispose();
         }
 
         public MemorySample Sample(float reportIntervalSeconds)
@@ -96,6 +118,8 @@ namespace VanillaProfiler.Aggregation
             long mainThread = AverageValid(m_MainThreadRecorder);
             long renderThread = AverageValid(m_RenderThreadRecorder);
             long gpuFrame = AverageValid(m_GpuFrameTimeRecorder);
+            long workerTime = AverageValid(m_WorkerTimeRecorder);
+            long workerWait = AverageValid(m_WorkerWaitRecorder);
 
             double managedGrowthRate;
             if (!m_GrowthBaselineCaptured)
@@ -148,6 +172,8 @@ namespace VanillaProfiler.Aggregation
                 MainThreadCpuNs = mainThread,
                 RenderThreadCpuNs = renderThread,
                 GpuFrameTimeNs = gpuFrame,
+                JobWorkerTimeNs = workerTime,
+                JobWorkerWaitNs = workerWait,
             };
         }
 
@@ -160,19 +186,18 @@ namespace VanillaProfiler.Aggregation
 
         private static long ReadValid(ProfilerRecorder r) => r.Valid ? r.LastValue : 0;
 
-        private static long AverageValid(ProfilerRecorder r)
+        private long AverageValid(ProfilerRecorder r)
         {
             if (!r.Valid || r.Capacity == 0) return 0;
             int count = r.Count;
             if (count == 0) return 0;
-            // Allocates a small array each call. The sampler runs once per report
-            // window (~5s), not on the hot path, so the GC noise is negligible.
-            var samples = new System.Collections.Generic.List<ProfilerRecorderSample>(count);
-            r.CopyTo(samples);
+            m_SampleBuffer.Clear();
+            r.CopyTo(m_SampleBuffer);
             long sum = 0;
-            for (int i = 0; i < samples.Count; i++)
-                sum += samples[i].Value;
-            return sum / samples.Count;
+            int n = m_SampleBuffer.Count;
+            for (int i = 0; i < n; i++)
+                sum += m_SampleBuffer[i].Value;
+            return n > 0 ? sum / n : 0;
         }
     }
 }

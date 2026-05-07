@@ -1,6 +1,14 @@
 # VanillaProfiler — Player Guide
 
-Lightweight in-game profiler. Tells you when the game is healthy, when it isn't, and which mod is responsible. Designed to be turned on permanently or pulled out when you need to diagnose lag.
+Lightweight in-game frame-health and main-thread monitor. Tells you when the game is healthy, when it isn't, and which mod (or vanilla system) is doing the most work on the main thread. Designed to be turned on permanently or pulled out when you need to diagnose lag.
+
+## What this mod can and cannot measure
+
+**Accurate:** frame time, FPS, GPU frame time, CPU main/render thread time, memory (managed/Mono/native/GPU), memory leak detection, frame spike count, frame spike screenshot, mod conflict detection.
+
+**Main-thread cost only** (per-system / per-mod tables): scheduling overhead, sync points, structural changes (`EntityManager`), ECB playback, and synchronous main-thread work. Useful for finding badly-architected mods and sync-point hotspots — flagged with `[likely sync point]` in the log when an Update() exceeds the threshold.
+
+**Not measured:** Burst-compiled job execution on worker threads. A clean DOTS system can cost 5–20 ms on workers and show ~0.01 ms here. For per-job analysis attach Unity Profiler to the running game — that's the only tool with engine-level instrumentation inside jobs.
 
 ## Hotkeys
 
@@ -51,7 +59,7 @@ TrafficLightsEnhancer
 ```
 
 ### Details
-Advanced screen for mod authors and support. It shows top mods, top vanilla systems, top mod systems, FPS sparkline, and city context.
+Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, GPU/CPU thread time, and city context. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
 
 ```
 VANILLA PROFILER  >  DETAILS

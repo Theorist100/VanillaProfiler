@@ -1,15 +1,30 @@
 # VanillaProfiler
 
-Standalone diagnostic mod for Cities: Skylines II. Drop-in install: shows a player-friendly status / diagnosis / details overlay, attributes CPU time to individual mods, detects managed memory leaks, and exports a one-click bug report.
+Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install — a traffic-light health overlay for normal players, and a main-thread / sync-point / memory analyzer for mod authors and power users.
 
-## What it does
+## For players
 
-- Shows a simple player status and diagnosis screen, with advanced details one Ctrl+F9 press away
-- Measures FPS, frame time, sim ticks/s, managed memory growth, per-system timing
-- Splits vanilla vs mod systems and attributes each system to its owning mod
-- Detects sustained memory growth (likely leak) and renders a "traffic light" health summary
-- Classifies bottleneck (RENDER / SIM / MEMORY / BALANCED) with one-line player advice
-- Captures auto-screenshots on frame spikes, exports a one-click diagnostic report for bug reports
+- Status screen — Good / Warning / Problem with the likely cause and one-line advice
+- Diagnosis screen — plain-language explanation when something is wrong
+- Memory leak detector — flags sustained managed-heap growth across the recent window
+- Bottleneck verdict (RenderBound / SimBound / MemoryBound / Balanced) with concrete next step
+- Auto-screenshots on frame spikes
+- Ctrl+F11 export — one-click support file (system info, mods, stats, log tail) to send to mod authors
+
+## For mod authors and power users
+
+- Details overlay — per-system main-thread cost (vanilla vs each mod), GPU/CPU/render-thread breakdown, FPS sparkline
+- Sync-point flagging — Update() calls above SyncPointThresholdMs (default 0.5 ms) tagged `[likely sync point]` in the log; per-system suspect-call counter
+- ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
+- Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas
+- Aggregate worker-thread metrics when the build exposes them (CS2 release strips most; values stay 0 silently)
+- HarmonyConflictDetector — lists methods patched by more than one mod
+
+## Scope of measurement
+
+Per-system numbers reflect **main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes (`EntityManager.*`), `EntityCommandBuffer.Playback`, and any synchronous main-thread work. Job execution on worker threads is **not** captured: Burst-compiled jobs run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod. A well-architected DOTS system that schedules cleanly to workers will show ~0.01 ms here while its jobs may cost 5–20 ms on workers — those appear on Unity Profiler's worker timeline.
+
+Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecorder), all memory metrics, frame spike detection and sync-point flagging are accurate. For per-job analysis attach **Unity Profiler** to the running game.
 
 ## Documentation
 

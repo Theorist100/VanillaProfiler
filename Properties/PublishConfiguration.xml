@@ -2,19 +2,35 @@
 <Publish>
   <ModId Value="142844" />
   <DisplayName Value="Vanilla Profiler" />
-  <ShortDescription Value="Lightweight in-game profiler — find which mod is lagging your game." />
+  <ShortDescription Value="In-game frame health, sync-point and memory monitor — find which mod stresses your main thread." />
   <LongDescription>## Vanilla Profiler
 
-A lightweight in-game profiler that gives normal players a simple status, a plain-language diagnosis, and a support file to send when a modded city starts lagging.
+Diagnostic mod for Cities: Skylines II. Two audiences in one install — a traffic-light health overlay for normal players, and a main-thread / sync-point / memory analyzer for mod authors and power users.
 
-### What it shows
+### For players
 
-- **Status screen** — Good / Warning / Problem with the likely cause
-- **Diagnosis screen** — plain-language explanation and next steps
-- **Details screen** — advanced Top Mods and system tables for support
-- **Memory leak detector** — flags sustained growth across the recent report window
-- **60-second FPS sparkline** — see the trend at a glance
-- **Auto-screenshots on stutters** — frames over 100 ms get captured to disk for bug reports
+- **Status screen** — Good / Warning / Problem with the likely cause and one-line advice
+- **Diagnosis screen** — plain-language explanation when something is wrong
+- **Memory leak detector** — flags sustained managed-heap growth
+- **Bottleneck verdict** — RenderBound / SimBound / MemoryBound / Balanced with concrete next step
+- **Auto-screenshots on stutters** — frames over 100 ms get captured to disk
+- **Ctrl+F11 support file** — one-click bundle (system info, mods, stats, log tail) to send to mod authors
+
+### For mod authors and power users
+
+- **Per-system main-thread cost** — Stopwatch around every SystemBase.Update separates vanilla vs each mod; assemblies attributed by ModAttribution
+- **Sync-point flagging** — Update() calls above the threshold (default 0.5 ms, tunable) tagged "[likely sync point]" in the log; per-system suspect-call counter
+- **ECB.Playback timing** — Harmony hook on EntityCommandBuffer.Playback surfaces structural-change cost separately from system Update time
+- **GPU/CPU thread breakdown** — Unity ProfilerRecorder for CPU Main / CPU Render / GPU Frame Time (real hardware numbers, not driver-reported)
+- **Full 5-second PERF reports** in VanillaProfiler.log — phase tables, top vanilla and mod systems by main-thread time, ECB cost, memory deltas
+- **Memory metrics** — managed (GC), Mono heap, native alloc/reserved, GPU driver memory, growth rate per second, baseline delta
+- **Harmony conflict detector** — lists methods patched by more than one mod
+
+### Scope of measurement (read this)
+
+Per-system numbers reflect **main-thread cost only** — scheduling overhead, sync points, structural changes, ECB playback, and synchronous main-thread work. Job execution on worker threads is **not** captured: Burst-compiled jobs run as native code outside SystemBase.Update() and cannot be instrumented from a mod. For per-job analysis attach **Unity Profiler** to the running game.
+
+Frame time, GPU frame time, CPU main/render thread time, all memory metrics, frame spike detection and sync-point flagging are accurate.
 
 ### Hotkeys
 
@@ -50,15 +66,17 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.3.0" />
+  <ModVersion Value="1.4.0" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>v1.3.0 — Smart Tips and accurate GPU/CPU diagnosis
-- Tips screen reads your current graphics settings on first open and skips fixes you have already applied: Motion Blur, Depth of Field, Volumetrics, Level of Detail, Fullscreen mode, Max Frame Latency
-- Tips window now sizes itself to the number of fixes shown — no half-empty panel when most settings are already tuned
-- New "Threads" line on the Details screen breaks the frame down into CPU main / CPU render / GPU time using Unity's ProfilerRecorder
-- Bottleneck verdict reports the actual GPU bound percentage instead of a generic label (e.g. "GPU bound 80% — lower graphics quality")
-- Detects the classic CPU-render-locks-GPU pattern directly from thread numbers and surfaces it as critical advice</ChangeLog>
+  <ChangeLog>v1.4.0 — sync-point detection and accurate measurement scope
+- Per-system numbers now labelled as main-thread cost: scheduling overhead, sync points, structural changes, ECB playback. Burst-compiled jobs running on worker threads are not captured — for per-job analysis use Unity Profiler.
+- New: sync-point detection. Per-system Update() calls above SyncPointThresholdMs (default 0.5 ms) are flagged as "[likely sync point]" in the log — these are the real main-thread bottlenecks worth investigating.
+- New: ECB.Playback timing. EntityCommandBuffer playback is always main-thread and is now timed separately under Phases.
+- New: aggregate worker-thread metrics. When the build exposes the markers, "Job workers" line shows total job execution time and main-thread wait-on-workers per frame (no per-system attribution).
+- Renamed report fields: "Top Systems" / "System Time" → "Top Main-Thread Systems" / "Main-Thread Cost" to match what is actually measured.
+- Removed GC garbage from MemorySampler and report-builder hot paths (pooled sort buffers, reused ProfilerRecorderSample buffer).
+- Log file is now truncated at every game start instead of growing indefinitely — keeps VanillaProfiler.log focused on the current session, never balloons across runs.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

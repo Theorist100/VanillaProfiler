@@ -49,6 +49,15 @@ namespace VanillaProfiler.Diagnostics
             sb.AppendLine($"Game version:     {Application.version}");
             sb.AppendLine($"Unity:            {Application.unityVersion}");
             sb.AppendLine();
+            sb.AppendLine("--- Scope of measurement ---");
+            sb.AppendLine("  Per-system numbers below reflect main-thread cost only — scheduling");
+            sb.AppendLine("  overhead, sync points (Dependency.Complete / CompleteDependencyBeforeRO),");
+            sb.AppendLine("  structural changes, ECB playback, and any synchronous main-thread work.");
+            sb.AppendLine("  Job execution on worker threads is NOT captured: Burst-compiled jobs run");
+            sb.AppendLine("  outside SystemBase.Update() and cannot be instrumented from a mod.");
+            sb.AppendLine("  For accurate per-job profiling attach Unity Profiler to the running game.");
+            sb.AppendLine("  Frame time, GPU/CPU thread time and memory metrics are accurate.");
+            sb.AppendLine();
 
             sb.AppendLine("--- System Info ---");
             sb.AppendLine($"OS:               {SystemInfo.operatingSystem}");
@@ -107,7 +116,7 @@ namespace VanillaProfiler.Diagnostics
 
             if (snap?.TopMods != null && snap.TopMods.Length > 0)
             {
-                sb.AppendLine($"--- Top Mods (by total CPU time, {WindowLabel(snap)}) ---");
+                sb.AppendLine($"--- Top Mods (by main-thread time, {WindowLabel(snap)}) ---");
                 foreach (var (modName, ms) in snap.TopMods)
                     sb.AppendLine(Inv($"  {modName,-40} {ms,8:F1} ms"));
                 sb.AppendLine();
@@ -115,7 +124,7 @@ namespace VanillaProfiler.Diagnostics
 
             if (snap?.TopModSystems != null && snap.TopModSystems.Length > 0)
             {
-                sb.AppendLine("--- Top Mod Systems ---");
+                sb.AppendLine("--- Top Mod Systems (main-thread cost) ---");
                 foreach (var (name, ms) in snap.TopModSystems)
                     sb.AppendLine(Inv($"  {name,-40} {ms,8:F1} ms"));
                 sb.AppendLine();
@@ -123,7 +132,7 @@ namespace VanillaProfiler.Diagnostics
 
             if (snap?.TopVanillaSystems != null && snap.TopVanillaSystems.Length > 0)
             {
-                sb.AppendLine("--- Top Vanilla Systems ---");
+                sb.AppendLine("--- Top Vanilla Systems (main-thread cost) ---");
                 foreach (var (name, ms) in snap.TopVanillaSystems)
                     sb.AppendLine(Inv($"  {name,-40} {ms,8:F1} ms"));
                 sb.AppendLine();
