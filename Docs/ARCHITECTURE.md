@@ -4,7 +4,11 @@
 
 - **Zero gameplay impact.** No entities created, no game state mutated. All measurement happens through Harmony patches and read-only ECS queries.
 - **Low overhead.** ~300 Stopwatch start/stop pairs per sim tick + four small queries every 5 seconds. Negligible compared to the systems being measured.
-- **Player-facing first.** The dev-oriented `VanillaProfiler.log` stays as a record of truth, but the overlay and exporter translate raw numbers into actionable verdicts.
+- **Two audiences.** Status / Diagnosis modes for normal players (traffic-light health, leak detection, support-file export). Details mode + `VanillaProfiler.log` for mod authors and power users (per-system main-thread cost, sync-point flagging, ECB.Playback timing, memory deltas).
+
+## Scope of measurement
+
+Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) capture **main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes, `EntityCommandBuffer.Playback`, and any synchronous main-thread work. Burst-compiled jobs scheduled to worker threads run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod in a release build. Frame time, GPU/CPU thread time (Unity ProfilerRecorder), all memory metrics and the sync-point threshold flag are accurate. For per-job analysis attach Unity Profiler.
 
 ## Module layout
 
@@ -13,8 +17,9 @@ VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
 ├── Profiler.cs                 Aggregator. Owns the lock, the report writer, the snapshot.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic.
-├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call.
+├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (main-thread cost).
 ├── UpdateSystemPatch.cs        Harmony patch — measures phase boundaries (Pre/Post/Render).
+├── EntityCommandBufferPatch.cs Harmony patch — times EntityCommandBuffer.Playback (always main-thread).
 ├── SimTickCounterSystem.cs     Counts simulation ticks (1 call per game tick).
 ├── CityContextSystem.cs        ECS — refreshes citizen/vehicle/building counts every 5 s.
 └── Diagnostics/                Pure-logic helpers, no Harmony, no Unity API except where noted.
@@ -109,9 +114,11 @@ The bottleneck logic uses **average phase ms per call** — derived from `Profil
 
 | Patch | Target | Purpose |
 |---|---|---|
-| `SystemAutoProfiler` | `SystemBase.Update` | Per-system timing for every system in every world |
+| `SystemAutoProfiler` | `SystemBase.Update` | Per-system main-thread cost for every system in every world |
 | `UpdateSystemPatch.UpdatePhase` | `UpdateSystem.Update(SystemUpdatePhase)` | Phase timing + render frame trigger |
 | `UpdateSystemPatch.UpdatePhaseWithIndex` | `UpdateSystem.Update(SystemUpdatePhase, uint, int)` | GameSimulation tick phase timing |
+| `EntityCommandBufferPatch.PlaybackEntityManager` | `EntityCommandBuffer.Playback(EntityManager)` | ECB playback time, surfaced as `ECB.Playback` phase |
+| `EntityCommandBufferPatch.PlaybackExclusiveTransaction` | `EntityCommandBuffer.Playback(ExclusiveEntityTransaction)` | Same, alternate overload (gated when missing on the build) |
 
 `HarmonyConflictDetector` runs once after the first report (deferred to give other mods time to apply their patches). It enumerates `Harmony.GetAllPatchedMethods()` and lists any method patched by more than one owner. The result goes to `VanillaProfiler.log` as a one-off section.
 
@@ -135,9 +142,10 @@ The mod follows a **single multi-threaded entry point** rule rather than scatter
 - **No structural ECS changes.** Only read-only `EntityQuery.CalculateEntityCount()`. Patches are pre/postfix only — never transpilers, never finalizers.
 - **No UI Toolkit / Coherent UI.** IMGUI is sufficient and avoids the layering complexity of CS2's binding system.
 - **No quality recommendations beyond bottleneck hint.** "Render-bound, lower graphics" is generic enough; finer advice would be guesswork.
+- **No per-job worker-thread profiling.** Burst-compiled jobs run as native code outside `SystemBase.Update()`; their per-system cost cannot be observed from a mod in a release build. Unity Profiler with engine-level instrumentation is the only tool that can. We surface aggregate worker time when the `ProfilerCategory.Internal` markers are exposed (usually stripped in release — silently zero when missing).
 
 ## See also
 
-- [USER_GUIDE.md](USER_GUIDE.md) — Player-facing reference for the overlay
+- [../USER_GUIDE.md](../USER_GUIDE.md) — Player-facing reference for the overlay
 - [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md) — How to add a metric or extend the overlay
 - [PLAN.md](../../VanillaProfiler/PLAN.md) — Original phase-by-phase plan

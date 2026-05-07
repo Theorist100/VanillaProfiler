@@ -71,3 +71,12 @@ local/
 CLAUDE.md
 tmpclaude-*
 build_out.txt
+publish_out.txt
+
+# Internal planning docs — never publish
+Docs/REWORK_PLAN.md
+Docs/PLAN.md
+Docs/TODO.md
+TODO.md
+PLAN.md
+REWORK_*.md

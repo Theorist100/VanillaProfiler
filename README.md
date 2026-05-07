@@ -30,7 +30,7 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 
 | Document | Audience | Purpose |
 |---|---|---|
-| [Docs/USER_GUIDE.md](Docs/USER_GUIDE.md) | Players | Hotkeys, overlay modes, how to read the report, how to share it |
+| [USER_GUIDE.md](USER_GUIDE.md) | Players | Hotkeys, overlay modes, how to read the report, how to share it |
 | [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md) | Developers | Code layout, data flow, key classes |
 | [Docs/DEVELOPER_NOTES.md](Docs/DEVELOPER_NOTES.md) | Contributors | How to add new metrics, gotchas, build tips |
 
