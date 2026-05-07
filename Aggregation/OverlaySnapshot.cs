@@ -1,3 +1,5 @@
+using System;
+
 namespace VanillaProfiler
 {
     /// <summary>
@@ -51,5 +53,12 @@ namespace VanillaProfiler
         public double GcCollectStallMs;
         public long GcCollectCount;
         public double AppResidentMB;
+
+        // Vanilla systems whose OnUpdate has a foreign Harmony prefix. Always
+        // set (Array.Empty when nothing was detected) so overlay code can
+        // branch on .Length without a null guard. Scanned by
+        // SystemReplacementDetector once per report cycle.
+        public (string VanillaSystem, string OwnerMod)[] ReplacedVanillaSystems
+            = Array.Empty<(string, string)>();
     }
 }

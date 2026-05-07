@@ -166,7 +166,13 @@ namespace VanillaProfiler
             if (lifecycle == ProfilerLifecycleState.Settling)
                 OverlayBadges.DrawSettling(m_Theme, scale);
             else if (lifecycle == ProfilerLifecycleState.Active && mode.IsHidden)
-                OverlayBadges.DrawHidden(m_Theme, scale);
+            {
+                // True-hide opt-out: a player who knows the Ctrl+F9 hotkey can disable
+                // the hint pill so it stops overlapping top-right HUD buttons. Default
+                // is on so a first-time hider doesn't lose the way back.
+                if (SettingsStore.Current.HideHintBadge)
+                    OverlayBadges.DrawHidden(m_Theme, scale);
+            }
             else if (lifecycle == ProfilerLifecycleState.Active)
                 DrawMainPanel(profiler, mode, snapshot, health, scale);
             // else: Initializing / LoadingCity / NoCity → nothing drawn
@@ -239,6 +245,13 @@ namespace VanillaProfiler
             m_ModeIndex = index;
             if (m_Modes[m_ModeIndex] is RecommendationsMode)
                 GraphicsSettingsProbe.Invalidate();
+            // Hide-mode safety net: when the hint pill is disabled the screen
+            // goes fully blank, leaving no visible cue how to come back. The
+            // toast lasts ~3s, then the screen is truly clean as Emilithe asked.
+            // We skip it when the pill is on — the pill already advertises the
+            // hotkey, and a flashing toast on top of it is just noise.
+            if (m_Modes[m_ModeIndex] is HiddenMode && !SettingsStore.Current.HideHintBadge)
+                m_Toast.Show("Profiler hidden — Ctrl+F9 to cycle, Ctrl+F8 settings");
         }
 
         private void DoOpenSettings() => m_Settings.Toggle();

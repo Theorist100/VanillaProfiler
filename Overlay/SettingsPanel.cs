@@ -18,17 +18,26 @@ namespace VanillaProfiler.Overlay
     /// </summary>
     public sealed class SettingsPanel
     {
-        private const float W = 480f;
-        // Base form height; dynamic rows (custom scale / validation error) are added
-        // by MeasureHeight so future fields don't silently clip or leave huge gaps.
-        private const float BASE_H = 478f;
+        // 560 px gives ~70 px per slot in the 6-mode Default segmented row,
+        // which matches the main panel's bottom tab width — so "Details" and
+        // "Engine" fit without clipping. Text-field rows have plenty of empty
+        // right margin at this width; that's fine, they're not the constraint.
+        private const float W = 560f;
+        // Base form height — sized to the actual content (last hint row ends at
+        // y=436) plus a one-PAD bottom margin matching the top PAD. Dynamic rows
+        // (custom scale / validation error) add LINE_H each via MeasureHeight,
+        // so adding a fixed row here means bumping BASE_H by LINE_H + 4.
+        private const float BASE_H = 446f;
         private const int WINDOW_ID = 0xC1F1C1;
         private const float SAVE_DEBOUNCE_S = 0.5f;
         private const float MIN_VISIBLE_PX = 100f;
 
         public event EventHandler OnApplied;
 
-        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Engine", "Hidden" };
+        // Last label matches HiddenMode.DisplayName ("Hide") so the segmented row
+        // shows the same word as the bottom-row mode tabs. "Hidden" used to clip
+        // at this column width (~48 px per slot on a 6-mode strip).
+        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Engine", "Hide" };
         private static readonly string[] s_AnchorLabels = { "Top-L", "Top-R", "Bot-R", "Bot-L" };
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
@@ -46,6 +55,7 @@ namespace VanillaProfiler.Overlay
         private bool m_DirtySpikeThreshold;
         private bool m_DirtyUiScale;
         private bool m_DirtyProfileVanilla;
+        private bool m_DirtyHideHintBadge;
 
         // Draggable window state. Rect is in logical (pre-GUI.matrix) coordinates.
         private Rect m_WindowRect;
@@ -208,6 +218,15 @@ namespace VanillaProfiler.Overlay
                 theme.HintStyle);
             ly += OverlayPanel.LINE_H + 4f;
 
+            bool newHideHint = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                m_Draft.HideHintBadge, " Show hint pill in Hide mode", theme.ToggleStyle);
+            if (newHideHint != m_Draft.HideHintBadge)
+            {
+                m_Draft.HideHintBadge = newHideHint;
+                m_DirtyHideHintBadge = true;
+            }
+            ly += OverlayPanel.LINE_H + 4f;
+
             ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Spike threshold (ms)",
                 ref m_SpikeThresholdText, () => { m_DirtySpikeThreshold = true; m_ErrorText = null; }, "33-1000");
 
@@ -265,10 +284,14 @@ namespace VanillaProfiler.Overlay
         private static float DrawSegmentedRow(OverlayTheme theme, float lx, float ly, float fw,
             string label, int current, string[] labels, Action<int> onChanged)
         {
-            GUI.Label(new Rect(lx, ly, 160f, OverlayPanel.LINE_H), label, theme.BodyStyle);
+            // Tighter label gutter than DrawTextField (110 vs 160). Segment row
+            // labels ("Default mode", "Position", "UI scale") are shorter than
+            // text-field labels ("Report interval (s)") so they fit in 110 px,
+            // which gives the segmented buttons more room to render long names.
+            GUI.Label(new Rect(lx, ly, 110f, OverlayPanel.LINE_H), label, theme.BodyStyle);
             int next = SettingsWidgets.DrawSegmented(
                 theme,
-                new Rect(lx + 170f, ly, fw - 170f, OverlayPanel.LINE_H),
+                new Rect(lx + 120f, ly, fw - 120f, OverlayPanel.LINE_H),
                 current,
                 labels);
             if (next != current) onChanged(next);
@@ -277,14 +300,20 @@ namespace VanillaProfiler.Overlay
 
         private float DrawActionButtons(float lx, float ly)
         {
-            float btnW = 110f;
             float btnH = OverlayPanel.LINE_H + 8f;
+            float gap = 8f;
+            // Stretch across the full content width so the action row reaches
+            // the same right edge as the segmented rows above. Equal-width
+            // thirds means the row reads as a single grid with the form,
+            // instead of looking shorter / centered as a separate block.
+            float fw = W - OverlayPanel.PAD * 2f;
+            float btnW = (fw - gap * 2f) / 3f;
             var theme = m_ActiveTheme;
             if (GUI.Button(new Rect(lx, ly, btnW, btnH), "Apply & Save", theme.ButtonStyle))
                 Apply();
-            if (GUI.Button(new Rect(lx + btnW + 8f, ly, btnW, btnH), "Reset Defaults", theme.ButtonStyle))
+            if (GUI.Button(new Rect(lx + btnW + gap, ly, btnW, btnH), "Reset Defaults", theme.ButtonStyle))
                 ResetDraftToDefaults();
-            if (GUI.Button(new Rect(lx + (btnW + 8f) * 2f, ly, btnW, btnH), "Close", theme.ButtonStyle))
+            if (GUI.Button(new Rect(lx + (btnW + gap) * 2f, ly, btnW, btnH), "Close", theme.ButtonStyle))
                 Close();
             return ly + btnH + 8f;
         }
@@ -298,11 +327,13 @@ namespace VanillaProfiler.Overlay
 
         private float DrawScaleRow(OverlayTheme theme, float lx, float ly, float fw)
         {
-            GUI.Label(new Rect(lx, ly, 160f, OverlayPanel.LINE_H), "UI scale", theme.BodyStyle);
+            // Match DrawSegmentedRow's 110/120 gutter so all three segmented
+            // rows (Default mode / Position / UI scale) start at the same x.
+            GUI.Label(new Rect(lx, ly, 110f, OverlayPanel.LINE_H), "UI scale", theme.BodyStyle);
             int current = ScaleIndex(m_Draft.UiScale);
             int next = SettingsWidgets.DrawSegmented(
                 theme,
-                new Rect(lx + 170f, ly, fw - 170f, OverlayPanel.LINE_H),
+                new Rect(lx + 120f, ly, fw - 120f, OverlayPanel.LINE_H),
                 current,
                 s_ScaleLabels);
             if (next >= 0 && next != current)
@@ -312,7 +343,7 @@ namespace VanillaProfiler.Overlay
             }
             if (current < 0)
             {
-                GUI.Label(new Rect(lx + 170f, ly + OverlayPanel.LINE_H, fw - 170f, OverlayPanel.LINE_H),
+                GUI.Label(new Rect(lx + 120f, ly + OverlayPanel.LINE_H, fw - 120f, OverlayPanel.LINE_H),
                     $"Custom scale: {m_Draft.UiScale:0.##}x", theme.HintStyle);
                 return ly + OverlayPanel.LINE_H * 2f + 4f;
             }
@@ -350,6 +381,7 @@ namespace VanillaProfiler.Overlay
             if (m_DirtySpikeThreshold) merged.SpikeThresholdMs = m_Draft.SpikeThresholdMs;
             if (m_DirtyUiScale) merged.UiScale = m_Draft.UiScale;
             if (m_DirtyProfileVanilla) merged.ProfileVanillaSystems = m_Draft.ProfileVanillaSystems;
+            if (m_DirtyHideHintBadge) merged.HideHintBadge = m_Draft.HideHintBadge;
             if (m_PosDirty)
             {
                 merged.SettingsX = m_WindowRect.x;
@@ -407,6 +439,7 @@ namespace VanillaProfiler.Overlay
             m_DirtySpikeThreshold = false;
             m_DirtyUiScale = false;
             m_DirtyProfileVanilla = false;
+            m_DirtyHideHintBadge = false;
         }
 
         private void MarkAllDirty()
@@ -419,6 +452,7 @@ namespace VanillaProfiler.Overlay
             m_DirtySpikeThreshold = true;
             m_DirtyUiScale = true;
             m_DirtyProfileVanilla = true;
+            m_DirtyHideHintBadge = true;
         }
     }
 }

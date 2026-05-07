@@ -25,6 +25,7 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one install — a traff
 - **Full 5-second PERF reports** in VanillaProfiler.log — phase tables, top vanilla and mod systems by main-thread time, ECB cost, memory deltas
 - **Memory metrics** — managed (GC), Mono heap, native alloc/reserved, GPU driver memory, growth rate per second, baseline delta
 - **Harmony conflict detector** — lists methods patched by more than one mod
+- **Patched-vanilla detector** — when a mod prefixes a vanilla OnUpdate (replacing it), surfaces the row "Game.X.YSystem ← ModName" so the cost gap in the per-system table is attributed
 
 ### Scope of measurement (read this)
 
@@ -36,7 +37,7 @@ Frame time, GPU frame time, CPU main/render thread time, all memory metrics, fra
 
 - **Ctrl+F7** — Toggle spike screenshots
 - **Ctrl+F8** — Settings panel
-- **Ctrl+F9** — Cycle overlay mode (Status → Diagnosis → Details → Hidden)
+- **Ctrl+F9** — Cycle overlay mode (Status → Diagnosis → Tips → Details → Engine → Hide)
 - **Ctrl+F10** — Force log dump
 - **Ctrl+F11** — Create a support file (system info, mods, stats, log tail)
 - **Ctrl+F12** — Cycle overlay position
@@ -66,13 +67,12 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.4.1" />
+  <ModVersion Value="1.4.2" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>Fixed GC count: per-window delta instead of cumulative ring
-New Recommendations mode + settings polish
-Present Wait detection — CPU-paced vs GPU-bound diagnosis
-New Engine overlay: DrawCalls, SetPass, Tris/Verts, Shadows, GPU memory breakdown</ChangeLog>
+  <ChangeLog>Patched-vanilla detector — names the mod that prefixes a vanilla OnUpdate
+True-hide toggle — option to remove the [Ctrl+F9] pill in Hide mode
+Settings panel layout fix — segmented rows aligned, action buttons stretched</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

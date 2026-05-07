@@ -39,6 +39,12 @@ namespace VanillaProfiler.Diagnostics
         // are always profiled. Toggle when you specifically need vanilla breakdown.
         public bool ProfileVanillaSystems = false;
 
+        // Show the "[Ctrl+F9] Profiler" pill in the top-right when the overlay is
+        // hidden. ON by default so a player who toggles to Hide doesn't lose the
+        // hotkey. Players who already memorised the hotkey can disable it for a
+        // fully clean screen — the pill otherwise overlaps top-right HUD buttons.
+        public bool HideHintBadge = true;
+
         // UI scaling. 0 = auto from screen height, otherwise explicit multiplier
         // (typical values 1.0/1.5/2.0). Clamped to [0.75, 3.0] on load.
         public float UiScale = 0f;

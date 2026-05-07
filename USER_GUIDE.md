@@ -18,7 +18,7 @@ All shortcuts use **Ctrl + F-key** so they don't collide with vanilla Cities: Sk
 |---|---|
 | **Ctrl+F7** | Toggle spike screenshots (auto-capture on frames over threshold) |
 | **Ctrl+F8** | Open / close settings panel |
-| **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Tips → Details → Engine → Hidden |
+| **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Tips → Details → Engine → Hide |
 | **Ctrl+F10** | Force an immediate report dump to `VanillaProfiler.log` |
 | **Ctrl+F11** | Export full diagnostic report (support file) to `Reports/CSII_Report_*.txt` |
 | **Ctrl+F12** | Cycle overlay position: Top-Left → Top-Right → Bottom-Right → Bottom-Left |
@@ -63,6 +63,8 @@ Actionable recommendations picked from the current health report and graphics se
 
 ### Details
 Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, and city context. Per-thread CPU/GPU/PresentWait breakdown lives on the Engine screen instead. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
+
+A **Patched vanilla systems** section appears when another mod has applied a Harmony prefix to a vanilla `OnUpdate`. Those vanilla systems run through a foreign gate (or are skipped outright), so their cost cannot be measured directly — but the line `Game.Foo.BarSystem ← ModName` tells you which mod owns the replacement. Up to 6 entries on screen; the full list is always written to `VanillaProfiler.log` as the `PATCHED VANILLA SYSTEMS` section once per save.
 
 ```
 VANILLA PROFILER  >  DETAILS
@@ -113,8 +115,10 @@ Reading guide:
 - **GPU memory split** lets you tell a buffer leak from a render-target leak.
 - **GC stall** ⇒ how much frame time was lost to managed garbage collection in the window.
 
-### Hidden
-Overlay disappears completely. Hotkeys still work. Toasts (e.g. "Support file created") still appear briefly at the bottom of the screen.
+### Hide
+Overlay disappears. Hotkeys still work. Toasts (e.g. "Support file created") still appear briefly at the bottom of the screen.
+
+By default a small `[Ctrl+F9] Profiler` pill stays in the top-right so you don't lose the way back. If it overlaps in-game HUD buttons you can disable it: **Ctrl+F8 → uncheck "Show hint pill in Hide mode" → Apply & Save**. With the pill off the screen is fully clean in Hide mode; entering Hide flashes a 3-second toast at the bottom (`Profiler hidden — Ctrl+F9 to cycle, Ctrl+F8 settings`) as a one-shot reminder.
 
 ## Reading the metrics
 
@@ -158,9 +162,12 @@ If the issue is repeated stutter (not just "feels slow"), enable **Ctrl+F7 spike
 | Report interval | 5 s | How often `VanillaProfiler.log` gets a new entry |
 | Sparkline width | 60 | Number of seconds shown in the FPS sparkline |
 | Spike screenshots | on | Auto-capture on frame > threshold |
+| Profile vanilla systems | off | Patches every vanilla `Update`; adds measurable overhead |
+| Show hint pill in Hide mode | on | Off = fully clean screen in Hide; entering Hide flashes a 3 s toast |
 | Spike threshold | 100 ms | Lower = more captures (with 30 s cooldown) |
 | Default mode | Status | Mode at game start |
 | Position | Top-Left | Anchor of the overlay |
+| UI scale | Auto | `Auto` follows screen height; pick `1×` … `2.5×` to override |
 
 Settings persist in `<persistentDataPath>/VanillaProfiler/settings.json` — survives game restarts. Reset Defaults restores everything in one click.
 

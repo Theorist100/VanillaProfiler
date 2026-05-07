@@ -40,6 +40,7 @@ namespace VanillaProfiler
         private float m_ReportTimer;
         private int m_ReportCount;
         private bool m_HarmonyScanned;
+        private bool m_ReplacementsLogged;
         private ProfilerLifecycleState m_LifecycleState = ProfilerLifecycleState.Initializing;
 
         // Defensive stale-reference guard for callbacks after OnDispose.
@@ -220,6 +221,19 @@ namespace VanillaProfiler
 
                 var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
 
+                // Replaced-systems scan walks World.All, so it only makes sense
+                // once a city is live (IsGameLoaded gate above already enforces
+                // that). Run every cycle — mods may toggle Enabled at runtime
+                // (mod-options screens flip vanilla systems on the fly), so a
+                // one-shot scan would freeze stale data into the overlay.
+                var replacements = SystemReplacementDetector.Scan();
+                snapshot.ReplacedVanillaSystems = ToTuples(replacements);
+                if (!m_ReplacementsLogged)
+                {
+                    m_ReplacementsLogged = true;
+                    SystemReplacementDetector.LogTo(this, replacements);
+                }
+
                 LastSnapshot = snapshot;
                 LastHealth = health;
                 m_LifecycleState = ProfilerLifecycleState.Active;
@@ -263,6 +277,15 @@ namespace VanillaProfiler
             }
         }
 
+        private static (string, string)[] ToTuples(System.Collections.Generic.List<SystemReplacementDetector.Replacement> list)
+        {
+            if (list == null || list.Count == 0) return Array.Empty<(string, string)>();
+            var arr = new (string, string)[list.Count];
+            for (int i = 0; i < list.Count; i++)
+                arr[i] = (list[i].VanillaSystem, list[i].OwnerMod);
+            return arr;
+        }
+
         private void ResetSessionState()
         {
             m_Metrics.Reset();
@@ -271,6 +294,7 @@ namespace VanillaProfiler
             FpsSparkline.Reset();
             SpikeScreenshot.Reset();
             m_HarmonyScanned = false;
+            m_ReplacementsLogged = false;
             m_LastFrameTicks = 0;
             m_LastReportTicks = Stopwatch.GetTimestamp();
             m_ReportTimer = 0f;
