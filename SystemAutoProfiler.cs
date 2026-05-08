@@ -94,9 +94,31 @@ namespace VanillaProfiler
                     info = BuildInfo(type);
                     s_Cache[type] = info;
                 }
-                if (info.IsVanilla && !SettingsStore.Current.ProfileVanillaSystems) return;
 
-                ProfilerHost.TryGet()?.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
+                // Patched vanilla systems are routed to a dedicated bucket
+                // independent of ProfileVanillaSystems. Their elapsed time
+                // blends the patching mod's prefix with the (possibly skipped)
+                // vanilla original — Harmony does not expose a hook between
+                // them — but the total ms is honest, and surfacing it is the
+                // whole point of the Patched vanilla systems section. We
+                // re-check the membership every call (instead of caching on
+                // SystemInfo) because mod-options screens can flip Harmony
+                // patches at runtime; SystemReplacementDetector rebuilds the
+                // set once per report cycle.
+                var profiler = ProfilerHost.TryGet();
+                if (profiler == null) return;
+
+                if (info.IsVanilla)
+                {
+                    if (SystemReplacementDetector.IsPatched(type))
+                    {
+                        profiler.RecordPatchedVanilla(info.Name, elapsed);
+                        return;
+                    }
+                    if (!SettingsStore.Current.ProfileVanillaSystems) return;
+                }
+
+                profiler.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
             }
             catch { /* profiler — never crash game */ }
         }

@@ -93,17 +93,22 @@ namespace VanillaProfiler.Overlay.Modes
             DrawReplacements(ctx, snapshot.ReplacedVanillaSystems);
         }
 
-        private static void DrawReplacements(DrawContext ctx, (string VanillaSystem, string OwnerMod)[] items)
+        private static void DrawReplacements(DrawContext ctx, (string VanillaSystem, string OwnerMod, double TotalMs)[] items)
         {
             if (items == null || items.Length == 0) return;
-            OverlayPanel.DrawSection(ctx, "Patched vanilla systems (cost not measurable)");
+            // The ms is honest total Update elapsed time. We can't split it
+            // between the patching mod's prefix and the (possibly skipped)
+            // vanilla original — Harmony does not expose a hook between
+            // them. Header reflects that: cost is shown, attribution split
+            // is what's not measurable.
+            OverlayPanel.DrawSection(ctx, "Patched vanilla systems (total Update ms, mod+vanilla split unknown)");
             int shown = items.Length > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : items.Length;
             for (int i = 0; i < shown; i++)
             {
                 var item = items[i];
-                string sys = OverlayFormat.Truncate(item.VanillaSystem, 44);
+                string sys = OverlayFormat.Truncate(item.VanillaSystem, 38);
                 OverlayPanel.DrawLine(ctx,
-                    $"  {sys,-44} ← {item.OwnerMod}",
+                    $"  {sys,-38}  {item.TotalMs,6:F1} ms  ← {item.OwnerMod}",
                     ctx.Theme.BodyStyle);
             }
             if (items.Length > shown)

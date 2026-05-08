@@ -82,8 +82,11 @@ The split between "what happens every frame" and "what happens every report" mat
 Runs after every `SystemBase.Update`. Does:
 
 - Resolve `Type` → `(name, isVanilla, modName)` once via `ModAttribution.Resolve` (cached)
-- Skip own systems (`namespace == "VanillaProfiler"`)
-- Push delta into `Profiler.RecordSystem`
+- For vanilla types, query `SystemReplacementDetector.IsPatched(Type)` (O(1) hash lookup, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime)
+- Route the elapsed delta:
+  - **patched vanilla** → `Profiler.RecordPatchedVanilla` (independent of `ProfileVanillaSystems`; the elapsed time blends mod prefix + vanilla original)
+  - **plain vanilla** → `Profiler.RecordSystem` if `ProfileVanillaSystems = true`, else dropped
+  - **mod system** → `Profiler.RecordSystem`
 
 `ModAttribution` decides ownership using:
 
@@ -92,6 +95,15 @@ Runs after every `SystemBase.Update`. Does:
 3. Fallback to assembly simple name
 
 The result is cached per type. Cold-path scan happens once per type discovered; subsequent calls are dictionary lookups.
+
+### `SystemReplacementDetector`
+
+Walks `World.All` once per report cycle, looking for vanilla systems whose `OnUpdate` has a foreign Harmony prefix. Maintains two outputs:
+
+- **`IsPatched(Type)`** — O(1) hash-set probe used by `SystemAutoProfiler.Postfix` on the hot path. Atomically swapped on each scan; main-thread only, no volatile needed.
+- **`Scan()` result** — `List<Replacement>` consumed by `Profiler.Report` to build the `OverlaySnapshot.ReplacedVanillaSystems` array. Merged with `MetricsSample.PatchedVanillaSystems` (the per-cycle ms bucket) by full type name, so each row carries `(VanillaSystem, OwnerMod, TotalMs)`.
+
+Why a separate bucket: a Harmony prefix can wrap or skip the original `OnUpdate`, so the elapsed time inside the patched `SystemBase.Update` is a blend of mod-prefix work and (possibly skipped) vanilla original. There is no Harmony hook between prefix and original to capture an intermediate timestamp. Surfacing the total `Update` ms is honest — the split is what's not measurable, not the cost itself.
 
 ### `MemoryHistory`
 

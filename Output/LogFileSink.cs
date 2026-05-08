@@ -104,6 +104,14 @@ namespace VanillaProfiler.Output
                 WriteSystemTable("TOP MODS (by main-thread time)", metrics.ModAggregate, 10);
                 WriteSystemTable("VANILLA SYSTEMS — main-thread cost (top 15)", metrics.VanillaSystems, 15);
                 WriteSystemTable("MOD SYSTEMS — main-thread cost (top 15)", metrics.ModSystems, 15);
+                // Patched vanilla systems are tracked in their own bucket
+                // because their elapsed time blends the patching mod's prefix
+                // with the vanilla original. Surfacing the table per cycle
+                // means a bug-report log carries the same signal the overlay
+                // shows — without it the only patched-vanilla ms data lives
+                // off-disk in the snapshot.
+                WriteSystemTable("PATCHED VANILLA SYSTEMS — total Update ms (mod+vanilla split unknown)",
+                    metrics.PatchedVanillaSystems, 15);
                 WriteMemorySection(memory);
                 WriteHealthSummary(health);
             }

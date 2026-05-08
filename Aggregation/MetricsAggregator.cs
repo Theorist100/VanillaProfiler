@@ -29,11 +29,13 @@ namespace VanillaProfiler.Aggregation
         private Dictionary<string, PhaseData> m_VanillaSystems = new();
         private Dictionary<string, PhaseData> m_ModSystems = new();
         private Dictionary<string, PhaseData> m_ModAggregate = new();
+        private Dictionary<string, PhaseData> m_PatchedVanillaSystems = new();
 
         private Dictionary<string, PhaseData> m_SparePhases = new();
         private Dictionary<string, PhaseData> m_SpareVanillaSystems = new();
         private Dictionary<string, PhaseData> m_SpareModSystems = new();
         private Dictionary<string, PhaseData> m_SpareModAggregate = new();
+        private Dictionary<string, PhaseData> m_SparePatchedVanillaSystems = new();
 
         public void RecordSimTick()
         {
@@ -63,6 +65,18 @@ namespace VanillaProfiler.Aggregation
                 Add(m_ModAggregate, modName, ticks, m_SyncPointTickThreshold);
         }
 
+        /// <summary>
+        /// Records a SystemBase.Update measurement for a vanilla system whose
+        /// OnUpdate is currently patched by a foreign Harmony prefix. Routes
+        /// to a dedicated bucket so the Patched vanilla systems overlay
+        /// section can show total ms regardless of <c>ProfileVanillaSystems</c>,
+        /// without double-counting against <c>VanillaSystems</c>.
+        /// </summary>
+        public void RecordPatchedVanilla(string name, long ticks)
+        {
+            Add(m_PatchedVanillaSystems, name, ticks, m_SyncPointTickThreshold);
+        }
+
         /// <summary>Swaps out accumulated state; dispose the lease to return buffers.</summary>
         public MetricsLease Drain()
         {
@@ -80,12 +94,14 @@ namespace VanillaProfiler.Aggregation
             Dictionary<string, PhaseData> vanillaSystems = m_VanillaSystems;
             Dictionary<string, PhaseData> modSystems = m_ModSystems;
             Dictionary<string, PhaseData> modAggregate = m_ModAggregate;
+            Dictionary<string, PhaseData> patchedVanillaSystems = m_PatchedVanillaSystems;
 
             ResetCounters();
             m_Phases = TakeSpare(ref m_SparePhases);
             m_VanillaSystems = TakeSpare(ref m_SpareVanillaSystems);
             m_ModSystems = TakeSpare(ref m_SpareModSystems);
             m_ModAggregate = TakeSpare(ref m_SpareModAggregate);
+            m_PatchedVanillaSystems = TakeSpare(ref m_SparePatchedVanillaSystems);
 
             var sample = new MetricsSample
             {
@@ -99,6 +115,7 @@ namespace VanillaProfiler.Aggregation
                 VanillaSystems = vanillaSystems,
                 ModSystems = modSystems,
                 ModAggregate = modAggregate,
+                PatchedVanillaSystems = patchedVanillaSystems,
             };
             return new MetricsLease(this, sample);
         }
@@ -110,10 +127,12 @@ namespace VanillaProfiler.Aggregation
             StoreSpare(ref m_SpareVanillaSystems, sample.VanillaSystems);
             StoreSpare(ref m_SpareModSystems, sample.ModSystems);
             StoreSpare(ref m_SpareModAggregate, sample.ModAggregate);
+            StoreSpare(ref m_SparePatchedVanillaSystems, sample.PatchedVanillaSystems);
             sample.Phases = null;
             sample.VanillaSystems = null;
             sample.ModSystems = null;
             sample.ModAggregate = null;
+            sample.PatchedVanillaSystems = null;
         }
 
         public void Reset()
@@ -123,10 +142,12 @@ namespace VanillaProfiler.Aggregation
             m_VanillaSystems.Clear();
             m_ModSystems.Clear();
             m_ModAggregate.Clear();
+            m_PatchedVanillaSystems.Clear();
             m_SparePhases?.Clear();
             m_SpareVanillaSystems?.Clear();
             m_SpareModSystems?.Clear();
             m_SpareModAggregate?.Clear();
+            m_SparePatchedVanillaSystems?.Clear();
         }
 
         private static void Add(Dictionary<string, PhaseData> dict, string key, long ticks, long syncPointTickThreshold)

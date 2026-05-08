@@ -8,10 +8,13 @@ namespace VanillaProfiler.Diagnostics
 {
     /// <summary>
     /// Surfaces vanilla systems whose <c>OnUpdate</c> is hooked by a foreign
-    /// Harmony prefix. The original method may be wrapped or skipped outright,
-    /// so the per-system cost table cannot show its true vanilla cost — but
-    /// the replacement signal itself ("Mod X patches vanilla Y") is the
-    /// diagnostic players otherwise have no way to see.
+    /// Harmony prefix. The total <c>SystemBase.Update</c> elapsed time is still
+    /// measured by <see cref="SystemAutoProfiler"/>, but Harmony does not let us
+    /// split that elapsed time between the patching mod's prefix and the
+    /// (possibly skipped) vanilla original — there is no hook between prefix
+    /// and original for an intermediate timestamp. We surface both the patch
+    /// signal ("Mod X patches vanilla Y") and the total ms via
+    /// <see cref="IsPatched"/> + the dedicated bucket in <c>MetricsAggregator</c>.
     ///
     /// We do NOT report <c>Enabled = false</c>: vanilla itself disables
     /// dozens of systems based on game mode (debug systems in release,
@@ -32,9 +35,33 @@ namespace VanillaProfiler.Diagnostics
             public string OwnerMod;
         }
 
+        // Hot-path snapshot of currently-patched vanilla System types. Read by
+        // SystemAutoProfiler.Postfix on every SystemBase.Update; rebuilt by
+        // Scan() once per report cycle. Empty set, never null. Atomic
+        // reference swap is enough — both Scan() and the Postfix run on the
+        // main thread.
+        private static HashSet<Type> s_PatchedTypes = new HashSet<Type>();
+
+        /// <summary>
+        /// True if the given vanilla System type's <c>OnUpdate</c> currently
+        /// has a foreign Harmony prefix. Returns false for unknown types and
+        /// outside report cycles. O(1) hash lookup, safe to call from the
+        /// SystemBase.Update Postfix hot path.
+        /// </summary>
+        public static bool IsPatched(Type type)
+        {
+            if (type == null) return false;
+            return s_PatchedTypes.Contains(type);
+        }
+
         public static List<Replacement> Scan()
         {
             var result = new List<Replacement>();
+            // Build the new patched-types set off to the side and swap it in
+            // atomically at the end. A live reader (SystemAutoProfiler.Postfix)
+            // either sees the previous full set or the new full set, never a
+            // half-populated one.
+            var freshTypes = new HashSet<Type>();
             try
             {
                 foreach (var world in World.All)
@@ -50,6 +77,7 @@ namespace VanillaProfiler.Diagnostics
                         string owners = ResolveOnUpdatePrefixOwners(type);
                         if (owners == null) continue;
 
+                        freshTypes.Add(type);
                         result.Add(new Replacement
                         {
                             VanillaSystem = type.FullName,
@@ -63,6 +91,7 @@ namespace VanillaProfiler.Diagnostics
             {
                 ModLog.Warn($"System replacement scan failed: {ex}");
             }
+            s_PatchedTypes = freshTypes;
             return result;
         }
 
@@ -101,6 +130,10 @@ namespace VanillaProfiler.Diagnostics
         /// Writes a one-off section to PERF.log on the first scan after city
         /// load, mirroring <see cref="HarmonyConflictDetector"/>'s pattern so
         /// support files capture the replacement signal alongside conflicts.
+        /// Per-cycle ms numbers are not in this listing — they live in the
+        /// overlay's Patched vanilla systems section and the per-report
+        /// snapshot, since this method runs once before any window has
+        /// accumulated timing data.
         /// </summary>
         public static void LogTo(Profiler profiler, List<Replacement> replacements)
         {
@@ -110,6 +143,12 @@ namespace VanillaProfiler.Diagnostics
                 var sb = new StringBuilder();
                 sb.AppendLine();
                 sb.AppendLine($"PATCHED VANILLA SYSTEMS  —  {replacements.Count} found");
+                if (replacements.Count > 0)
+                {
+                    sb.AppendLine("  Total Update ms is reported in the overlay's Patched vanilla systems");
+                    sb.AppendLine("  section. The elapsed time blends the patching mod's prefix with the");
+                    sb.AppendLine("  vanilla original — Harmony does not let us split them.");
+                }
                 sb.AppendLine(new string('─', 50));
                 if (replacements.Count == 0)
                 {

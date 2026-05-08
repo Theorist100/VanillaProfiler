@@ -138,6 +138,14 @@ namespace VanillaProfiler.Diagnostics
                 sb.AppendLine();
             }
 
+            if (snap?.ReplacedVanillaSystems != null && snap.ReplacedVanillaSystems.Length > 0)
+            {
+                sb.AppendLine("--- Patched Vanilla Systems (total Update ms, mod+vanilla split unknown) ---");
+                foreach (var (sys, owner, ms) in snap.ReplacedVanillaSystems)
+                    sb.AppendLine(Inv($"  {sys,-40} {ms,8:F1} ms  ← {owner}"));
+                sb.AppendLine();
+            }
+
             sb.AppendLine($"--- Last {LOG_TAIL_LINES} lines of VanillaProfiler.log ---");
             foreach (var line in TailPerfLog(LOG_TAIL_LINES))
                 sb.AppendLine(line);

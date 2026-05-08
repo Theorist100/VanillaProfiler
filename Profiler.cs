@@ -127,6 +127,20 @@ namespace VanillaProfiler
             m_Metrics.RecordSystem(name, ticks, isVanilla, modName);
         }
 
+        /// <summary>
+        /// Main thread (SystemBase.Update Harmony Postfix). Routes a vanilla
+        /// system whose OnUpdate is currently patched by a foreign Harmony
+        /// prefix to the dedicated bucket — the elapsed time blends mod
+        /// prefix and (possibly skipped) vanilla original, which is honest
+        /// total cost but not attributable to either side.
+        /// </summary>
+        public void RecordPatchedVanilla(string name, long ticks)
+        {
+            MainThreadGuard.AssertMainThread(nameof(RecordPatchedVanilla));
+            if (m_Disposed) return;
+            m_Metrics.RecordPatchedVanilla(name, ticks);
+        }
+
         /// <summary>Main thread (UpdateSystem phase Postfix).</summary>
         public void RecordPhase(string name, long ticks)
         {
@@ -227,7 +241,7 @@ namespace VanillaProfiler
                 // (mod-options screens flip vanilla systems on the fly), so a
                 // one-shot scan would freeze stale data into the overlay.
                 var replacements = SystemReplacementDetector.Scan();
-                snapshot.ReplacedVanillaSystems = ToTuples(replacements);
+                snapshot.ReplacedVanillaSystems = ToTuples(replacements, metrics.PatchedVanillaSystems);
                 if (!m_ReplacementsLogged)
                 {
                     m_ReplacementsLogged = true;
@@ -277,12 +291,20 @@ namespace VanillaProfiler
             }
         }
 
-        private static (string, string)[] ToTuples(System.Collections.Generic.List<SystemReplacementDetector.Replacement> list)
+        private static (string, string, double)[] ToTuples(
+            System.Collections.Generic.List<SystemReplacementDetector.Replacement> list,
+            System.Collections.Generic.Dictionary<string, Aggregation.PhaseData> patchedMs)
         {
-            if (list == null || list.Count == 0) return Array.Empty<(string, string)>();
-            var arr = new (string, string)[list.Count];
+            if (list == null || list.Count == 0) return Array.Empty<(string, string, double)>();
+            var arr = new (string, string, double)[list.Count];
             for (int i = 0; i < list.Count; i++)
-                arr[i] = (list[i].VanillaSystem, list[i].OwnerMod);
+            {
+                var r = list[i];
+                double ms = 0.0;
+                if (patchedMs != null && patchedMs.TryGetValue(r.VanillaSystem, out var phase))
+                    ms = phase.TotalTicks * 1000.0 / Stopwatch.Frequency;
+                arr[i] = (r.VanillaSystem, r.OwnerMod, ms);
+            }
             return arr;
         }
 

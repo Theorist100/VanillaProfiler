@@ -25,7 +25,7 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one install — a traff
 - **Full 5-second PERF reports** in VanillaProfiler.log — phase tables, top vanilla and mod systems by main-thread time, ECB cost, memory deltas
 - **Memory metrics** — managed (GC), Mono heap, native alloc/reserved, GPU driver memory, growth rate per second, baseline delta
 - **Harmony conflict detector** — lists methods patched by more than one mod
-- **Patched-vanilla detector** — when a mod prefixes a vanilla OnUpdate (replacing it), surfaces the row "Game.X.YSystem ← ModName" so the cost gap in the per-system table is attributed
+- **Patched-vanilla detector** — when a mod prefixes a vanilla OnUpdate, surfaces the row "Game.X.YSystem N.N ms ← ModName". Total Update ms is measured unconditionally (independent of the "Profile vanilla systems" toggle); the elapsed time blends the patching mod's prefix with the vanilla original because Harmony does not let us split them, but the total is honest. Listed per cycle in the overlay, the PERF.log report tables, and the Ctrl+F11 export.
 
 ### Scope of measurement (read this)
 
@@ -67,12 +67,12 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.4.2" />
+  <ModVersion Value="1.4.3" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>Patched-vanilla detector — names the mod that prefixes a vanilla OnUpdate
-True-hide toggle — option to remove the [Ctrl+F9] pill in Hide mode
-Settings panel layout fix — segmented rows aligned, action buttons stretched</ChangeLog>
+  <ChangeLog>Patched-vanilla systems now show total Update ms, not just the owner — the elapsed time blends the patching mod's prefix with the vanilla original, but the total is measured honestly and surfaced. Independent of the "Profile vanilla systems" toggle.
+Per-cycle PATCHED VANILLA SYSTEMS table added to VanillaProfiler.log, plus Patched Vanilla Systems section in the Ctrl+F11 export — bug-report logs are now self-contained.
+Section header rewritten to "Patched vanilla systems (total Update ms, mod+vanilla split unknown)" so the meaning is correct: cost is measurable, attribution split isn't.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

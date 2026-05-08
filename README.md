@@ -21,7 +21,7 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 - ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
 - Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas, render counts, GC stall sums
 - HarmonyConflictDetector — lists multi-owner Harmony patches that involve VanillaProfiler
-- SystemReplacementDetector — surfaces vanilla `OnUpdate` methods hooked by a foreign Harmony prefix, so a mod that *replaces* a vanilla system (cost not measurable on the main-thread table) is still attributed by name
+- SystemReplacementDetector — surfaces vanilla `OnUpdate` methods hooked by a foreign Harmony prefix and reports total `Update` ms per cycle. The elapsed time blends the patching mod's prefix with the vanilla original (Harmony does not let us split them), but the total is honest and shown unconditionally — independent of `Profile vanilla systems`.
 
 ## Scope of measurement
 

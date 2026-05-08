@@ -64,7 +64,7 @@ Actionable recommendations picked from the current health report and graphics se
 ### Details
 Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, and city context. Per-thread CPU/GPU/PresentWait breakdown lives on the Engine screen instead. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
 
-A **Patched vanilla systems** section appears when another mod has applied a Harmony prefix to a vanilla `OnUpdate`. Those vanilla systems run through a foreign gate (or are skipped outright), so their cost cannot be measured directly — but the line `Game.Foo.BarSystem ← ModName` tells you which mod owns the replacement. Up to 6 entries on screen; the full list is always written to `VanillaProfiler.log` as the `PATCHED VANILLA SYSTEMS` section once per save.
+A **Patched vanilla systems** section appears when another mod has applied a Harmony prefix to a vanilla `OnUpdate`. The line shows `Game.Foo.BarSystem  N.N ms  ← ModName` — the ms is the total `SystemBase.Update` elapsed time during the report window, measured unconditionally (independent of `Profile vanilla systems`). The elapsed time blends the patching mod's prefix with the vanilla original because Harmony does not expose a hook between them, so the split between mod and vanilla is unknown — but the total cost is honest and surfaced. Up to 6 entries on screen; the full list of patches is always written to `VanillaProfiler.log` as the `PATCHED VANILLA SYSTEMS` section once per save.
 
 ```
 VANILLA PROFILER  >  DETAILS
