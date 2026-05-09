@@ -1,5 +1,6 @@
 using System;
 using HarmonyLib;
+using UnityEngine;
 
 namespace VanillaProfiler.Diagnostics
 {
@@ -7,8 +8,7 @@ namespace VanillaProfiler.Diagnostics
     /// Snapshot of graphics-related settings the player can change. Populated lazily
     /// on first access (see <see cref="GraphicsSettingsProbe.EnsureProbed"/>) so the
     /// hot path is never touched. Every field is tri-state — null means "we couldn't
-    /// read it", which prevents the recommendation engine from acting on incomplete
-    /// information.
+    /// read it", so concrete setting recommendations are skipped instead of guessed.
     /// </summary>
     public sealed class GraphicsSettingsState
     {
@@ -25,11 +25,14 @@ namespace VanillaProfiler.Diagnostics
     /// Reads the player's current CS2 graphics settings via Game.Settings.SharedSettings
     /// reflection. Cached after first call. Cost: ~5-15 ms one-time, never repeated.
     /// All access wrapped in try/catch — failures leave fields null, which the
-    /// recommendation engine treats as "show advice, we don't know the state".
+    /// recommendation engine treats as "unknown, do not give a setting-specific fix".
     /// </summary>
     public sealed class GraphicsSettingsProbe
     {
+        internal const float CacheTtlSeconds = 30f;
+
         private GraphicsSettingsState? m_State;
+        private float m_ProbedAtRealtime = float.NegativeInfinity;
 
         public GraphicsSettingsState State
         {
@@ -42,10 +45,11 @@ namespace VanillaProfiler.Diagnostics
 
         public void EnsureProbed()
         {
-            if (m_State != null) return;
+            if (m_State != null && Time.realtimeSinceStartup - m_ProbedAtRealtime < CacheTtlSeconds) return;
             var state = new GraphicsSettingsState { ProbeAttempted = true };
             ProbeAll(state);
             m_State = state;
+            m_ProbedAtRealtime = Time.realtimeSinceStartup;
             ModLog.Info(
                 "Graphics probe: " +
                 $"FullscreenWindowed={Fmt(state.IsFullscreenWindowed)} " +
@@ -60,6 +64,7 @@ namespace VanillaProfiler.Diagnostics
         public void Invalidate()
         {
             m_State = null;
+            m_ProbedAtRealtime = float.NegativeInfinity;
         }
 
         private static void ProbeAll(GraphicsSettingsState state)

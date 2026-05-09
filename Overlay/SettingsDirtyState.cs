@@ -8,6 +8,8 @@ namespace VanillaProfiler.Overlay
     /// </summary>
     internal sealed class SettingsDirtyState
     {
+        private bool m_ReplaceAll;
+
         public bool ReportInterval { get; set; }
         public bool DefaultMode { get; set; }
         public bool Anchor { get; set; }
@@ -20,6 +22,8 @@ namespace VanillaProfiler.Overlay
 
         public void SyncLiveSettings(SettingsDraft draft, ProfilerSettings live)
         {
+            if (m_ReplaceAll) return;
+
             if (!Anchor)
                 draft.Anchor = live.Anchor;
             if (!SpikeScreenshots)
@@ -29,19 +33,22 @@ namespace VanillaProfiler.Overlay
         }
 
         public ProfilerSettings Merge(ProfilerSettings live, SettingsDraft draft)
-            => live.With(
-                reportIntervalSec: ReportInterval ? draft.ReportIntervalSec : null,
-                defaultMode: DefaultMode ? draft.DefaultMode : null,
-                anchor: Anchor ? draft.Anchor : null,
-                sparklineWidth: SparklineWidth ? draft.SparklineWidth : null,
-                spikeScreenshots: SpikeScreenshots ? draft.SpikeScreenshots : null,
-                spikeThresholdMs: SpikeThreshold ? draft.SpikeThresholdMs : null,
-                uiScale: UiScale ? draft.UiScale : null,
-                profileVanillaSystems: ProfileVanilla ? draft.ProfileVanillaSystems : null,
-                hideHintBadge: HideHintBadge ? draft.HideHintBadge : null);
+            => m_ReplaceAll
+                ? draft.ToSettings().Normalize()
+                : live.With(
+                    reportIntervalSec: ReportInterval ? draft.ReportIntervalSec : null,
+                    defaultMode: DefaultMode ? draft.DefaultMode : null,
+                    anchor: Anchor ? draft.Anchor : null,
+                    sparklineWidth: SparklineWidth ? draft.SparklineWidth : null,
+                    spikeScreenshots: SpikeScreenshots ? draft.SpikeScreenshots : null,
+                    spikeThresholdMs: SpikeThreshold ? draft.SpikeThresholdMs : null,
+                    uiScale: UiScale ? draft.UiScale : null,
+                    profileVanillaSystems: ProfileVanilla ? draft.ProfileVanillaSystems : null,
+                    hideHintBadge: HideHintBadge ? draft.HideHintBadge : null);
 
         public void Clear()
         {
+            m_ReplaceAll = false;
             ReportInterval = false;
             DefaultMode = false;
             Anchor = false;
@@ -64,6 +71,12 @@ namespace VanillaProfiler.Overlay
             UiScale = true;
             ProfileVanilla = true;
             HideHintBadge = true;
+        }
+
+        public void ReplaceAll()
+        {
+            m_ReplaceAll = true;
+            MarkAll();
         }
     }
 }

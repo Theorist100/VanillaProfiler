@@ -15,6 +15,7 @@ namespace VanillaProfiler.Overlay.Modes
         private OverlaySnapshot? m_CachedSnapshot;
         private HealthReport? m_CachedHealth;
         private IReadOnlyList<Recommendation>? m_CachedPicks;
+        private float m_CachedAtRealtime = float.NegativeInfinity;
 
         public string DisplayName => "Tips";
         public bool IsHidden => false;
@@ -24,6 +25,7 @@ namespace VanillaProfiler.Overlay.Modes
             m_CachedSnapshot = null;
             m_CachedHealth = null;
             m_CachedPicks = null;
+            m_CachedAtRealtime = float.NegativeInfinity;
         }
 
         public float MeasureHeight(OverlaySnapshot snapshot)
@@ -65,11 +67,13 @@ namespace VanillaProfiler.Overlay.Modes
         {
             if (m_CachedPicks != null
                 && ReferenceEquals(m_CachedSnapshot, snapshot)
-                && ReferenceEquals(m_CachedHealth, health))
+                && ReferenceEquals(m_CachedHealth, health)
+                && Time.realtimeSinceStartup - m_CachedAtRealtime < GraphicsSettingsProbe.CacheTtlSeconds)
                 return m_CachedPicks;
 
             m_CachedSnapshot = snapshot;
             m_CachedHealth = health;
+            m_CachedAtRealtime = Time.realtimeSinceStartup;
             m_CachedPicks = ProfilerHost.TryGetReadSurface()?.Recommendations.Build(health, snapshot)
                 ?? Array.Empty<Recommendation>();
             return m_CachedPicks;

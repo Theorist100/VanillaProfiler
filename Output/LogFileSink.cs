@@ -341,8 +341,36 @@ namespace VanillaProfiler.Output
             string path = Path.Combine(m_LogDir, LOG_FILENAME);
             var mode = m_TruncateOnNextOpen ? FileMode.Create : FileMode.Append;
             var stream = new FileStream(path, mode, FileAccess.Write, FileShare.ReadWrite);
-            m_TruncateOnNextOpen = false;
+            try
+            {
+                var writer = CreateInitializedWriter(stream);
+                m_TruncateOnNextOpen = false;
+                return writer;
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        private static StreamWriter CreateInitializedWriter(Stream stream)
+        {
             var writer = new StreamWriter(stream) { AutoFlush = true };
+            try
+            {
+                WriteSessionHeader(writer);
+                return writer;
+            }
+            catch
+            {
+                writer.Dispose();
+                throw;
+            }
+        }
+
+        private static void WriteSessionHeader(TextWriter writer)
+        {
             writer.WriteLine();
             writer.WriteLine(Inv($"=== Vanilla Profiler session === {DateTime.Now:yyyy-MM-dd HH:mm:ss}"));
             writer.WriteLine(Inv($"Report interval: {SettingsStore.Snapshot.Settings.ReportIntervalSec}s"));
@@ -354,7 +382,6 @@ namespace VanillaProfiler.Output
             writer.WriteLine("  Burst-compiled jobs run outside of SystemBase.Update(). For accurate");
             writer.WriteLine("  per-job profiling attach Unity Profiler to the running game.");
             writer.WriteLine();
-            return writer;
         }
 
         private static string Inv(FormattableString value) => FormattableString.Invariant(value);

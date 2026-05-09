@@ -54,6 +54,11 @@ namespace VanillaProfiler.Diagnostics
             return s_PatchedTypes.Contains(type);
         }
 
+        public static void Reset()
+        {
+            s_PatchedTypes = new HashSet<Type>();
+        }
+
         public static IReadOnlyList<Replacement> Scan()
         {
             var result = new List<Replacement>();
@@ -114,7 +119,7 @@ namespace VanillaProfiler.Diagnostics
                 if (prefix == null) continue;
                 if (string.Equals(prefix.owner, VanillaProfilerMod.HARMONY_ID, StringComparison.Ordinal))
                     continue;
-                string mod = ModAttribution.Resolve(prefix.PatchMethod?.DeclaringType);
+                string mod = ResolvePrefixOwner(prefix);
                 if (string.IsNullOrEmpty(mod)) continue;
                 if (string.Equals(mod, ModAttribution.VANILLA, StringComparison.Ordinal)
                     || string.Equals(mod, ModAttribution.PROFILER, StringComparison.Ordinal)) continue;
@@ -125,6 +130,15 @@ namespace VanillaProfiler.Diagnostics
             var ordered = new List<string>(set);
             ordered.Sort(StringComparer.Ordinal);
             return string.Join(", ", ordered);
+        }
+
+        private static string ResolvePrefixOwner(Patch prefix)
+        {
+            string mod = ModAttribution.Resolve(prefix.PatchMethod?.DeclaringType);
+            if (!string.IsNullOrEmpty(mod) && !string.Equals(mod, ModAttribution.UNKNOWN, StringComparison.Ordinal))
+                return mod;
+
+            return string.IsNullOrEmpty(prefix.owner) ? ModAttribution.UNKNOWN : prefix.owner;
         }
 
         /// <summary>

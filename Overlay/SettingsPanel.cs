@@ -131,6 +131,7 @@ namespace VanillaProfiler.Overlay
             EnsureWindowRect(scale);
             m_WindowRect.width = W;
             m_WindowRect.height = MeasureHeight();
+            PanelLayout.ClampInsideLogicalScreen(ref m_WindowRect, scale, MIN_VISIBLE_PX);
             var before = new Vector2(m_WindowRect.x, m_WindowRect.y);
             m_WindowDraggedThisFrame = false;
             m_WindowRect = GUI.Window(WINDOW_ID, m_WindowRect, DrawWindowContents, GUIContent.none, GUIStyle.none);
@@ -320,7 +321,7 @@ namespace VanillaProfiler.Overlay
         private void ResetDraftToDefaults()
         {
             m_Draft = new SettingsDraft(new ProfilerSettings());
-            MarkAllDirty();
+            m_Dirty.ReplaceAll();
             m_ErrorText = null;
             SyncTextFieldsFromDraft();
         }
@@ -385,9 +386,5 @@ namespace VanillaProfiler.Overlay
             m_Dirty.Clear();
         }
 
-        private void MarkAllDirty()
-        {
-            m_Dirty.MarkAll();
-        }
     }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO.Compression;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -31,7 +30,7 @@ namespace VanillaProfiler.Diagnostics
                 string report = BuildReport();
                 AtomicFileWriter.WriteAllText(path, report, Encoding.UTF8);
                 ModLog.Info($"Performance report saved: {path}");
-                TryWriteSupportBundle(path, report);
+                WriteSupportBundle(path, report);
                 return path;
             }
             catch (Exception ex)
@@ -273,49 +272,16 @@ namespace VanillaProfiler.Diagnostics
         private static string Counter(double value, bool available, string unit)
             => available ? Inv($"{value:F2} {unit}") : "unavailable";
 
-        private static void TryWriteSupportBundle(string reportPath, string report)
+        private static void WriteSupportBundle(string reportPath, string report)
         {
             try
             {
-                string zipPath = Path.ChangeExtension(reportPath, ".zip");
-                if (File.Exists(zipPath)) File.Delete(zipPath);
-                using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-                AddTextEntry(zip, Path.GetFileName(reportPath), report);
-                AddFileIfExists(zip, SettingsStore.FilePath, "settings.json", maxBytes: 256 * 1024);
-                AddFileIfExists(zip, LogFileSink.GetLogPath(Application.persistentDataPath),
-                    LogFileSink.LOG_FILENAME, maxBytes: 1024 * 1024);
-                ModLog.Info($"Support bundle saved: {zipPath}");
+                SupportBundleWriter.Write(reportPath, report);
             }
             catch (Exception ex)
             {
                 ModLog.Warn($"Support bundle export failed: {ex.Message}");
             }
-        }
-
-        private static void AddTextEntry(ZipArchive zip, string entryName, string text)
-        {
-            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Fastest);
-            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
-            writer.Write(text);
-        }
-
-        private static void AddFileIfExists(ZipArchive zip, string path, string entryName, int maxBytes)
-        {
-            if (!File.Exists(path)) return;
-            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Fastest);
-            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var output = entry.Open();
-            CopyTail(input, output, maxBytes);
-        }
-
-        private static void CopyTail(Stream input, Stream output, int maxBytes)
-        {
-            long start = input.Length > maxBytes ? input.Length - maxBytes : 0;
-            input.Position = start;
-            var buffer = new byte[8192];
-            int read;
-            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
-                output.Write(buffer, 0, read);
         }
 
         private static string WindowLabel(OverlaySnapshot? snap)

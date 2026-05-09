@@ -10,7 +10,7 @@ namespace VanillaProfiler.Overlay
         public int ModeIndex { get; private set; }
         public Anchor Anchor { get; private set; } = Anchor.TopLeft;
 
-        public void ApplyStartup(int defaultMode, int anchor, int modeCount)
+        public void Initialize(int defaultMode, int anchor, int modeCount)
         {
             SetMode(defaultMode, modeCount);
             Anchor = (Anchor)Mathf.Clamp(anchor, 0, 3);

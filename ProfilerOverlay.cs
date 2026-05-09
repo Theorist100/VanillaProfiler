@@ -33,6 +33,7 @@ namespace VanillaProfiler
         private MainPanelButtons m_Buttons = null!;
 
         private PanelPositionController m_PanelPosition = null!;
+        private Vector2 m_MainScroll;
         private bool m_SettingsSaveDirty;
         private float m_SettingsSaveDirtyAt;
 
@@ -63,7 +64,7 @@ namespace VanillaProfiler
                 },
                 ScheduleSettingsSave);
 
-            ApplyStartupSettings();
+            LoadInitialSettings();
 
             // Hotkeys and on-panel buttons share the same action methods so the two
             // entry points cannot drift in behaviour.
@@ -83,10 +84,10 @@ namespace VanillaProfiler
             };
         }
 
-        private void ApplyStartupSettings()
+        private void LoadInitialSettings()
         {
             var s = SettingsStore.Snapshot.Settings;
-            m_State.ApplyStartup(s.DefaultMode, s.Anchor, m_Modes.Length);
+            m_State.Initialize(s.DefaultMode, s.Anchor, m_Modes.Length);
             m_PanelPosition.Load();
         }
 
@@ -187,7 +188,8 @@ namespace VanillaProfiler
         {
             float contentHeight = mode.MeasureHeight(snapshot);
             if (contentHeight <= 0) return;
-            float totalHeight = contentHeight + MainPanelButtons.BLOCK_HEIGHT;
+            float naturalHeight = contentHeight + MainPanelButtons.BLOCK_HEIGHT;
+            float totalHeight = Mathf.Min(naturalHeight, PanelLayout.MaxWindowHeight(scale));
 
             // Layout: position from drag (manual) or from anchor preset; height
             // always recomputed from the active mode.
@@ -209,11 +211,40 @@ namespace VanillaProfiler
             var rect = new Rect(0f, 0f, panelRect.width, panelRect.height);
             OverlayPanel.DrawFrame(m_Theme, rect);
 
+            float contentHeight = mode.MeasureHeight(snapshot);
+            float viewportHeight = Mathf.Max(OverlayPanel.LINE_H, rect.height - MainPanelButtons.BLOCK_HEIGHT);
+            bool scrolling = contentHeight > viewportHeight;
+            if (scrolling)
+            {
+                var viewport = new Rect(0f, 0f, rect.width, viewportHeight);
+                var view = new Rect(0f, 0f, rect.width - 18f, contentHeight);
+                m_MainScroll = GUI.BeginScrollView(viewport, m_MainScroll, view, false, true);
+                DrawModeContent(profiler, snapshot, health, mode, settings, view.width);
+                GUI.EndScrollView();
+            }
+            else
+            {
+                m_MainScroll = Vector2.zero;
+                DrawModeContent(profiler, snapshot, health, mode, settings, rect.width);
+            }
+
+            SetModeIndex(m_Buttons.Draw(rect, m_State.ModeIndex, m_State.Anchor));
+
+            // Drag handle = the top header band only. Buttons and text fields below
+            // must still receive their own click events.
+            var dragHandle = new Rect(0f, 0f, rect.width, OverlayPanel.LINE_H + 12f);
+            m_PanelPosition.MarkDragIfActive(dragHandle);
+            GUI.DragWindow(dragHandle);
+        }
+
+        private void DrawModeContent(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
+            IOverlayMode mode, ProfilerSettingsSnapshot settings, float width)
+        {
             var ctx = new DrawContext(
                 m_Theme,
                 OverlayPanel.PAD,
                 OverlayPanel.PAD,
-                rect.width - OverlayPanel.PAD * 2)
+                width - OverlayPanel.PAD * 2)
             {
                 ModeIndex = m_State.ModeIndex,
                 ModeCount = m_Modes.Length,
@@ -226,14 +257,6 @@ namespace VanillaProfiler
             // so snapshot/health are current data. The Settling badge handles the
             // pre-snapshot phase.
             mode.Draw(ctx, snapshot, health);
-
-            SetModeIndex(m_Buttons.Draw(rect, m_State.ModeIndex, m_State.Anchor));
-
-            // Drag handle = the top header band only. Buttons and text fields below
-            // must still receive their own click events.
-            var dragHandle = new Rect(0f, 0f, rect.width, OverlayPanel.LINE_H + 12f);
-            m_PanelPosition.MarkDragIfActive(dragHandle);
-            GUI.DragWindow(dragHandle);
         }
 
         // Action methods — invoked by hotkeys (OverlayInputHandler events) and
@@ -246,6 +269,7 @@ namespace VanillaProfiler
             int previousMode = m_State.ModeIndex;
             m_State.SetMode(index, m_Modes.Length);
             if (m_State.ModeIndex == previousMode) return;
+            m_MainScroll = Vector2.zero;
             if (m_Modes[m_State.ModeIndex] is RecommendationsMode recommendationsMode)
             {
                 ProfilerHost.TryGetReadSurface()?.GraphicsSettings.Invalidate();

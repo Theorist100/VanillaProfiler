@@ -54,6 +54,12 @@ namespace VanillaProfiler.Overlay
             return new Rect(x, y, width, height);
         }
 
+        public static float MaxWindowHeight(float scale)
+        {
+            var (_, logicalH) = LogicalSize(scale);
+            return Mathf.Max(120f, logicalH - OverlayPanel.MARGIN * 2f);
+        }
+
         /// <summary>
         /// Keep at least <paramref name="minVisible"/> pixels of the panel on-screen so
         /// a user can't drag the window into oblivion and lose access to it.

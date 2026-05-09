@@ -52,6 +52,7 @@ namespace VanillaProfiler.Overlay
                 : PanelLayout.ComputeAnchorRect(anchor, width, height, scale);
             rect.width = width;
             rect.height = height;
+            PanelLayout.ClampInsideLogicalScreen(ref rect, scale, m_MinVisible);
             Rect = rect;
         }
 

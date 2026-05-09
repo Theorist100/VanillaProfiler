@@ -91,7 +91,7 @@ namespace VanillaProfiler.Diagnostics
 
         private static void AddVolumetricsRecommendation(List<Recommendation> list, GraphicsSettingsState probed)
         {
-            if (probed.VolumetricsEnabled == false) return;
+            if (probed.VolumetricsEnabled != true) return;
             list.Add(new Recommendation
             {
                 Level = RecommendationLevel.Critical,
@@ -116,22 +116,20 @@ namespace VanillaProfiler.Diagnostics
 
         private static void AddLodRecommendation(List<Recommendation> list, GraphicsSettingsState probed)
         {
-            if (probed.LevelOfDetail.HasValue && probed.LevelOfDetail.Value <= 0.75f) return;
+            if (!probed.LevelOfDetail.HasValue || probed.LevelOfDetail.Value <= 0.75f) return;
             list.Add(new Recommendation
             {
                 Level = RecommendationLevel.Suggested,
                 Title = "Lower Level of Detail to 0.75",
                 Action = "Settings -> Graphics -> Level of Detail = 0.75",
-                Reason = probed.LevelOfDetail.HasValue
-                    ? $"Currently {probed.LevelOfDetail.Value:F2} — single most impactful CS2 setting."
-                    : "Single most impactful CS2 setting per Paradox.",
+                Reason = $"Currently {probed.LevelOfDetail.Value:F2} — single most impactful CS2 setting.",
             });
         }
 
         private static void AddToggleRecommendation(
             List<Recommendation> list, bool? enabled, string title, string action, string reason)
         {
-            if (enabled == false) return;
+            if (enabled != true) return;
             list.Add(new Recommendation
             {
                 Level = RecommendationLevel.Suggested,
@@ -157,7 +155,7 @@ namespace VanillaProfiler.Diagnostics
         private static void AddInfoRecommendations(
             List<Recommendation> list, GraphicsSettingsState probed, bool perfTrouble)
         {
-            if (list.Count < MAX_RECOMMENDATIONS && probed.IsFullscreenWindowed != true)
+            if (list.Count < MAX_RECOMMENDATIONS && probed.IsFullscreenWindowed == false)
             {
                 list.Add(new Recommendation
                 {

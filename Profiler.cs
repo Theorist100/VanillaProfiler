@@ -36,29 +36,28 @@ namespace VanillaProfiler
         private readonly ReportScheduler m_Scheduler = new();
         private readonly SpikeScreenshot m_SpikeScreenshots = new();
         private readonly GraphicsSettingsProbe m_GraphicsSettings = new();
+        private readonly ProfilerSessionState m_Session = new();
 
         // Frame timing — main thread only
         private int m_ReportCount;
         private bool m_HarmonyScanned;
         private bool m_ReplacementsLogged;
-        private ProfilerLifecycleState m_LifecycleState = ProfilerLifecycleState.Initializing;
 
         // Defensive stale-reference guard for callbacks after OnDispose.
         private volatile bool m_Disposed;
 
-        public OverlaySnapshot? LastSnapshot { get; private set; }
-        public HealthReport? LastHealth { get; private set; }
+        public OverlaySnapshot? LastSnapshot => m_Session.LastSnapshot;
+        public HealthReport? LastHealth => m_Session.LastHealth;
         public MemoryHistory MemoryHistory { get; }
         public FpsSparkline FpsSparkline { get; } = new();
         public SpikeScreenshot SpikeScreenshots => m_SpikeScreenshots;
         public GraphicsSettingsProbe GraphicsSettings => m_GraphicsSettings;
         public RecommendationEngine Recommendations { get; }
 
-        public ProfilerLifecycleState LifecycleState => m_LifecycleState;
-        public bool IsGameLoaded => m_LifecycleState == ProfilerLifecycleState.Settling
-            || m_LifecycleState == ProfilerLifecycleState.Active;
-        public bool IsLoading => m_LifecycleState == ProfilerLifecycleState.LoadingCity;
-        public bool IsSettling => m_LifecycleState == ProfilerLifecycleState.Settling;
+        public ProfilerLifecycleState LifecycleState => m_Session.LifecycleState;
+        public bool IsGameLoaded => m_Session.IsGameLoaded;
+        public bool IsLoading => m_Session.IsLoading;
+        public bool IsSettling => m_Session.IsSettling;
         public bool ShouldProfileVanillaSystems => m_Settings().Settings.ProfileVanillaSystems;
 
         private float ReportInterval => m_Settings().Settings.ReportIntervalSec;
@@ -77,7 +76,7 @@ namespace VanillaProfiler
         {
             m_Disposed = true;
             m_Dispatcher.Shutdown();
-            ResetSessionState();
+            ResetMeasurementSession(resetCityContext: true);
             m_Memory.Dispose();
         }
 
@@ -86,21 +85,14 @@ namespace VanillaProfiler
             MainThreadGuard.AssertMainThread(nameof(SetGameLoaded));
             if (m_Disposed) return;
 
-            if (gameLoaded)
-            {
-                if (m_LifecycleState == ProfilerLifecycleState.Settling) return;
-                m_LifecycleState = ProfilerLifecycleState.Settling;
-            }
-            else
-            {
-                if (m_LifecycleState == ProfilerLifecycleState.NoCity) return;
-                m_LifecycleState = ProfilerLifecycleState.NoCity;
-            }
+            if (!m_Session.SetGameLoaded(gameLoaded)) return;
 
-            ResetSessionState();
-            CityContext.Reset();
-            if (m_LifecycleState == ProfilerLifecycleState.Settling)
+            ResetMeasurementSession(resetCityContext: true);
+            if (m_Session.IsSettling)
+            {
+                SystemReplacementDetector.Scan();
                 MemoryHistory.SuppressNextReports(5);
+            }
         }
 
         public void BeginLoading(bool loadsCity)
@@ -113,7 +105,8 @@ namespace VanillaProfiler
                 return;
             }
 
-            m_LifecycleState = ProfilerLifecycleState.LoadingCity;
+            if (!m_Session.BeginLoading()) return;
+            ResetMeasurementSession(resetCityContext: true);
         }
 
         // ---------- Hot-path recording ----------
@@ -239,9 +232,7 @@ namespace VanillaProfiler
 
         private void PublishSnapshot(OverlaySnapshot snapshot, HealthReport health)
         {
-            LastSnapshot = snapshot;
-            LastHealth = health;
-            m_LifecycleState = ProfilerLifecycleState.Active;
+            m_Session.Publish(snapshot, health);
         }
 
         private void WriteReports(
@@ -282,22 +273,21 @@ namespace VanillaProfiler
             return arr;
         }
 
-        private void ResetSessionState()
+        private void ResetMeasurementSession(bool resetCityContext)
         {
             m_Metrics.Reset();
             m_Memory.ResetBaseline();
             MemoryHistory.Reset();
             FpsSparkline.Reset();
             m_SpikeScreenshots.Reset();
+            m_GraphicsSettings.Invalidate();
+            SystemReplacementDetector.Reset();
+            if (resetCityContext)
+                CityContext.Reset();
             m_HarmonyScanned = false;
             m_ReplacementsLogged = false;
             m_Scheduler.Reset();
-            // Snapshot belongs to the previous session — drop it. Overlay reads
-            // IsSettling to decide what to render in this gap (explicit settling
-            // banner) instead of either a blank panel or numbers from a save the
-            // player isn't looking at anymore.
-            LastSnapshot = null;
-            LastHealth = null;
+            m_Session.ClearReadState();
         }
 
     }
