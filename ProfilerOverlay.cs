@@ -17,9 +17,8 @@ namespace VanillaProfiler
     public sealed class ProfilerOverlay : MonoBehaviour
     {
         private const float WIDTH = 440f;
-        private const int MAIN_WINDOW_ID = 0xC1F1C0;
+        internal const int MAIN_WINDOW_ID = 0xC1F1C0;
         private const float MIN_VISIBLE_PX = 80f;
-        private const float MAIN_HEADER_HEIGHT = OverlayPanel.PAD + OverlayPanel.LINE_H * 2f + 8f;
 
         // Throttle persistence of drag positions so a held-mouse-move doesn't write
         // the JSON file on every frame.
@@ -33,9 +32,9 @@ namespace VanillaProfiler
 
         private OverlayModeDescriptor[] m_Modes = Array.Empty<OverlayModeDescriptor>();
         private MainPanelButtons m_Buttons = null!;
+        private MainOverlayPanelRenderer m_MainPanel = null!;
 
         private PanelPositionController m_PanelPosition = null!;
-        private Vector2 m_MainScroll;
         private bool m_SettingsSaveDirty;
         private float m_SettingsSaveDirtyAt;
 
@@ -57,6 +56,14 @@ namespace VanillaProfiler
                     SettingsStore.Update(settings => settings.With(panelX: x, panelY: y), save: false);
                 },
                 ScheduleSettingsSave);
+            m_MainPanel = new MainOverlayPanelRenderer(
+                m_Theme,
+                m_Modes,
+                m_Buttons,
+                m_PanelPosition,
+                m_State,
+                WIDTH,
+                SetModeIndex);
 
             LoadInitialSettings();
 
@@ -158,114 +165,12 @@ namespace VanillaProfiler
             else if (lifecycle == ProfilerLifecycleState.Active)
             {
                 if (profiler != null && snapshot != null && health != null)
-                    DrawMainPanel(profiler, mode, snapshot, health, scale, settings);
+                    m_MainPanel.DrawMainPanel(profiler, mode, snapshot, health, scale, settings);
             }
             // else: Initializing / LoadingCity / NoCity → nothing drawn
 
             m_Settings.Draw(m_Theme, scale);
             m_Toast.Draw(m_Theme, scale);
-        }
-
-        private void DrawMainPanel(IProfilerReadSurface profiler, IOverlayMode mode, OverlaySnapshot snapshot,
-            HealthReport health, float scale, ProfilerSettingsSnapshot settings)
-        {
-            float contentHeight = mode.MeasureHeight(snapshot);
-            if (contentHeight <= 0) return;
-            float naturalHeight = MAIN_HEADER_HEIGHT + contentHeight + MainPanelButtons.BLOCK_HEIGHT;
-            float totalHeight = Mathf.Min(naturalHeight, PanelLayout.MaxWindowHeight(scale));
-
-            // Layout: position from drag (manual) or from anchor preset; height
-            // always recomputed from the active mode.
-            m_PanelPosition.ApplyLayout(m_State.Anchor, WIDTH, totalHeight, scale);
-            var rect = m_PanelPosition.Rect;
-            var before = new Vector2(rect.x, rect.y);
-
-            m_PanelPosition.BeginWindow();
-            rect = GUI.Window(MAIN_WINDOW_ID, rect,
-                id => DrawMainWindowContents(profiler, snapshot, health, mode, settings),
-                GUIContent.none, GUIStyle.none);
-            m_PanelPosition.CompleteWindow(rect, before, scale);
-        }
-
-        private void DrawMainWindowContents(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
-            IOverlayMode mode, ProfilerSettingsSnapshot settings)
-        {
-            var panelRect = m_PanelPosition.Rect;
-            var rect = new Rect(0f, 0f, panelRect.width, panelRect.height);
-            OverlayPanel.DrawFrame(m_Theme, rect);
-            DrawMainHeader(mode, rect.width);
-
-            float contentHeight = mode.MeasureHeight(snapshot);
-            float viewportHeight = Mathf.Max(OverlayPanel.LINE_H,
-                rect.height - MAIN_HEADER_HEIGHT - MainPanelButtons.BLOCK_HEIGHT);
-            bool scrolling = contentHeight > viewportHeight;
-            if (scrolling)
-            {
-                var viewport = new Rect(0f, MAIN_HEADER_HEIGHT, rect.width, viewportHeight);
-                var view = new Rect(0f, 0f, rect.width - 18f, contentHeight);
-                m_MainScroll = GUI.BeginScrollView(viewport, m_MainScroll, view, false, true);
-                try
-                {
-                    DrawModeContent(profiler, snapshot, health, mode, settings, view.width, OverlayPanel.PAD);
-                }
-                finally
-                {
-                    GUI.EndScrollView();
-                }
-            }
-            else
-            {
-                m_MainScroll = Vector2.zero;
-                DrawModeContent(profiler, snapshot, health, mode, settings, rect.width, MAIN_HEADER_HEIGHT + OverlayPanel.PAD);
-            }
-
-            SetModeIndex(m_Buttons.Draw(rect, m_State.ModeIndex, m_State.Anchor));
-
-            // Drag handle = the top header band only. Buttons and text fields below
-            // must still receive their own click events.
-            var dragHandle = new Rect(0f, 0f, rect.width, OverlayPanel.LINE_H + 12f);
-            m_PanelPosition.MarkDragIfActive(dragHandle);
-            GUI.DragWindow(dragHandle);
-        }
-
-        private void DrawMainHeader(IOverlayMode mode, float width)
-        {
-            var ctx = new DrawContext(
-                m_Theme,
-                OverlayPanel.PAD,
-                OverlayPanel.PAD,
-                width - OverlayPanel.PAD * 2)
-            {
-                ModeIndex = m_State.ModeIndex,
-                ModeCount = m_Modes.Length,
-                NextModeName = m_Modes[(m_State.ModeIndex + 1) % m_Modes.Length].DisplayName,
-            };
-            string title = mode is RecommendationsMode
-                ? "RECOMMENDATIONS"
-                : mode.DisplayName.ToUpperInvariant();
-            OverlayPanel.DrawHeaderWithCycle(ctx, $"VANILLA PROFILER  >  {title}");
-        }
-
-        private void DrawModeContent(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
-            IOverlayMode mode, ProfilerSettingsSnapshot settings, float width, float y)
-        {
-            var ctx = new DrawContext(
-                m_Theme,
-                OverlayPanel.PAD,
-                y,
-                width - OverlayPanel.PAD * 2)
-            {
-                ModeIndex = m_State.ModeIndex,
-                ModeCount = m_Modes.Length,
-                NextModeName = m_Modes[(m_State.ModeIndex + 1) % m_Modes.Length].DisplayName,
-                SparklineWidth = settings.Settings.SparklineWidth,
-                FpsSparkline = profiler.FpsSparklineText(settings.Settings.SparklineWidth),
-            };
-
-            // Contract: this method is only reached when LifecycleState == Active,
-            // so snapshot/health are current data. The Settling badge handles the
-            // pre-snapshot phase.
-            mode.Draw(ctx, snapshot, health);
         }
 
         // Action methods — invoked by semantic hotkey commands and on-panel buttons.
@@ -316,7 +221,7 @@ namespace VanillaProfiler
 
         private void OnModeChanged()
         {
-            m_MainScroll = Vector2.zero;
+            m_MainPanel.ResetScroll();
             if (m_Modes[m_State.ModeIndex].Mode is RecommendationsMode recommendationsMode)
             {
                 ProfilerHost.TryGetReadSurface()?.InvalidateRecommendationsCache();
