@@ -183,7 +183,7 @@ The main overlay header is drawn outside the scroll view, so long Details/Engine
 
 ### `ReportTextSections`
 
-Shared text-section builders used by both the periodic `LogFileSink` writes and the one-shot `ReportExporter`. Centralises counter-availability formatting, top-table layout, and patched-vanilla-system summaries so the two output paths stay consistent.
+Shared text-section builders used by both the periodic `Output/LogFileSink` writes and the one-shot `Output/ReportExporter`. Centralises counter-availability formatting, top-table layout, and patched-vanilla-system summaries so the two output paths stay consistent. Report and support-bundle writers live in `Output`; diagnostics code supplies analysis data but does not own file publication or logging policy.
 
 ## Harmony patches
 

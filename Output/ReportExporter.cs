@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
-using VanillaProfiler.Output;
+using VanillaProfiler.Diagnostics;
 
-namespace VanillaProfiler.Diagnostics
+namespace VanillaProfiler.Output
 {
     /// <summary>
     /// One-shot diagnostic report writer for players to attach to bug reports.
@@ -278,7 +278,8 @@ namespace VanillaProfiler.Diagnostics
         {
             try
             {
-                SupportBundleWriter.Write(reportPath, report);
+                string zipPath = SupportBundleWriter.Write(reportPath, report);
+                ModLog.Info($"Support bundle saved: {zipPath}");
             }
             catch (Exception ex)
             {

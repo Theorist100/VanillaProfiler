@@ -148,7 +148,7 @@ namespace VanillaProfiler.Diagnostics
                 Level = RecommendationLevel.Suggested,
                 Title = "Test without your top mod",
                 Action = $"Disable '{heaviest.Value.ModName}' and re-check.",
-                Reason = $"It alone consumes {heaviest.Value.TotalMs:F0} ms over the window.",
+                Reason = $"It consumes {heaviest.Value.Percent:P0} of the report window ({heaviest.Value.TotalMs:F0} ms self-time).",
             });
         }
 
@@ -166,7 +166,7 @@ namespace VanillaProfiler.Diagnostics
                 });
             }
 
-            if (list.Count < MAX_RECOMMENDATIONS && perfTrouble)
+            if (list.Count < MAX_RECOMMENDATIONS && perfTrouble && probed.TerrainShadowsEnabled == true)
             {
                 list.Add(new Recommendation
                 {
@@ -178,19 +178,23 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
-        private const double HEAVY_MOD_MS = 30.0;
+        private const double HEAVY_MOD_PERCENT = 0.10;
         private const string PROFILER_MOD_NAME = "VanillaProfiler";
 
-        private static (string ModName, double TotalMs)? HeaviestNonProfilerMod(OverlaySnapshot snap)
+        private static (string ModName, double TotalMs, double Percent)? HeaviestNonProfilerMod(OverlaySnapshot snap)
         {
             if (snap.TopMods == null) return null;
+            double windowMs = snap.WindowSeconds * 1000.0;
+            if (windowMs <= 0 || double.IsNaN(windowMs) || double.IsInfinity(windowMs)) return null;
+
             for (int i = 0; i < snap.TopMods.Count; i++)
             {
                 var entry = snap.TopMods[i];
                 if (string.IsNullOrEmpty(entry.ModName)) continue;
                 if (string.Equals(entry.ModName, PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
-                if (entry.TotalMs < HEAVY_MOD_MS) continue;
-                return entry;
+                double percent = entry.TotalMs / windowMs;
+                if (percent < HEAVY_MOD_PERCENT) continue;
+                return (entry.ModName, entry.TotalMs, percent);
             }
             return null;
         }

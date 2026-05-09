@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace VanillaProfiler.Diagnostics
 {
@@ -182,15 +183,15 @@ namespace VanillaProfiler.Diagnostics
             return score;
         }
 
-        private static readonly string[] s_RenderHeavyVanillaSystems =
+        private static readonly HashSet<string> s_RenderHeavyVanillaSystems = new(StringComparer.Ordinal)
         {
-            "BatchInstanceSystem",
-            "BatchDataSystem",
-            "PreCullingSystem",
-            "CullingSystem",
-            "RenderingSystem",
-            "LightSystem",
-            "ObjectInterpolateSystem",
+            "Game.Rendering.BatchInstanceSystem",
+            "Game.Rendering.BatchDataSystem",
+            "Game.Rendering.PreCullingSystem",
+            "Game.Rendering.CullingSystem",
+            "Game.Rendering.RenderingSystem",
+            "Game.Rendering.LightSystem",
+            "Game.Rendering.ObjectInterpolateSystem",
         };
 
         private static bool HasRenderHeavyVanillaTop(OverlaySnapshot snap)
@@ -198,9 +199,7 @@ namespace VanillaProfiler.Diagnostics
             if (snap.TopVanillaSystems.Count == 0) return false;
             var top = snap.TopVanillaSystems[0];
             if (top.TotalMs < 30.0) return false;
-            foreach (var name in s_RenderHeavyVanillaSystems)
-                if (string.Equals(top.Name, name, StringComparison.Ordinal)) return true;
-            return false;
+            return s_RenderHeavyVanillaSystems.Contains(top.Name);
         }
 
         private static HealthLevel ClassifyFps(double avgFps)

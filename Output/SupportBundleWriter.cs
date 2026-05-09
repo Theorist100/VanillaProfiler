@@ -9,7 +9,7 @@ namespace VanillaProfiler.Output
 {
     internal static class SupportBundleWriter
     {
-        public static void Write(string reportPath, string report)
+        public static string Write(string reportPath, string report)
         {
             string zipPath = Path.ChangeExtension(reportPath, ".zip");
             string tempPath = zipPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -25,7 +25,7 @@ namespace VanillaProfiler.Output
                 }
 
                 Publish(tempPath, zipPath);
-                ModLog.Info($"Support bundle saved: {zipPath}");
+                return zipPath;
             }
             catch
             {

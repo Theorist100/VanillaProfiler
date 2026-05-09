@@ -16,6 +16,7 @@ namespace VanillaProfiler.Diagnostics
         public bool? MotionBlurEnabled { get; internal set; }
         public bool? DepthOfFieldEnabled { get; internal set; }
         public bool? VolumetricsEnabled { get; internal set; }
+        public bool? TerrainShadowsEnabled { get; internal set; }
         public float? LevelOfDetail { get; internal set; }     // 0.10 - 1.00; Paradox recommends 0.75
         public int? MaxFrameLatency { get; internal set; }     // 1-3, CS2's "pre-rendered frames" setting
         public bool ProbeAttempted { get; internal set; }
@@ -56,6 +57,7 @@ namespace VanillaProfiler.Diagnostics
                 $"MotionBlur={Fmt(state.MotionBlurEnabled)} " +
                 $"DepthOfField={Fmt(state.DepthOfFieldEnabled)} " +
                 $"Volumetrics={Fmt(state.VolumetricsEnabled)} " +
+                $"TerrainShadows={Fmt(state.TerrainShadowsEnabled)} " +
                 $"LOD={(state.LevelOfDetail.HasValue ? state.LevelOfDetail.Value.ToString("F2") : "?")} " +
                 $"MaxFrameLatency={(state.MaxFrameLatency.HasValue ? state.MaxFrameLatency.Value.ToString() : "?")}");
         }
@@ -84,6 +86,7 @@ namespace VanillaProfiler.Diagnostics
                 "Game.Settings.MotionBlurQualitySettings", v => state.MotionBlurEnabled = v);
             TryReadQualitySettingEnabled(state, graphics, graphicsType,
                 "Game.Settings.VolumetricsQualitySettings", v => state.VolumetricsEnabled = v);
+            TryReadTerrainShadows(state, graphics, graphicsType);
             TryReadLevelOfDetail(state, graphics, graphicsType);
         }
 
@@ -163,12 +166,29 @@ namespace VanillaProfiler.Diagnostics
                 var qs = InvokeGetQualitySetting(graphics, graphicsType, qsType);
                 if (qs == null) return;
 
-                var enabledProp = AccessTools.Property(qs.GetType(), "enabled");
-                if (enabledProp == null) return;
-                var value = enabledProp.GetValue(qs);
-                if (value is bool b) assign(b);
+                if (TryReadBoolMember(qs, "enabled", out bool enabled))
+                    assign(enabled);
             }
             catch (Exception ex) { ModLog.Warn($"{qualitySettingTypeName} probe failed: {ex.Message}"); }
+        }
+
+        private static void TryReadTerrainShadows(GraphicsSettingsState state, object graphics, Type graphicsType)
+        {
+            try
+            {
+                var qsType = AccessTools.TypeByName("Game.Settings.TerrainQualitySettings");
+                if (qsType == null) return;
+
+                var qs = InvokeGetQualitySetting(graphics, graphicsType, qsType);
+                if (qs == null) return;
+
+                if (TryReadBoolMember(qs, "castsShadows", out bool castsShadows)
+                    || TryReadBoolMember(qs, "castShadows", out castsShadows)
+                    || TryReadBoolMember(qs, "terrainShadows", out castsShadows)
+                    || TryReadBoolMember(qs, "terrainCastShadows", out castsShadows))
+                    state.TerrainShadowsEnabled = castsShadows;
+            }
+            catch (Exception ex) { ModLog.Warn($"Terrain shadows probe failed: {ex.Message}"); }
         }
 
         private static void TryReadLevelOfDetail(GraphicsSettingsState state, object graphics, Type graphicsType)
@@ -184,6 +204,23 @@ namespace VanillaProfiler.Diagnostics
                 if (value is float f) state.LevelOfDetail = f;
             }
             catch (Exception ex) { ModLog.Warn($"LOD probe failed: {ex.Message}"); }
+        }
+
+        private static bool TryReadBoolMember(object target, string memberName, out bool value)
+        {
+            value = false;
+            var type = target.GetType();
+            var prop = AccessTools.Property(type, memberName);
+            var raw = prop?.GetValue(target);
+            if (raw == null)
+            {
+                var field = AccessTools.Field(type, memberName);
+                raw = field?.GetValue(target);
+            }
+
+            if (raw is not bool b) return false;
+            value = b;
+            return true;
         }
 
         // Resolve the closed generic GetQualitySetting<T> method and invoke it.

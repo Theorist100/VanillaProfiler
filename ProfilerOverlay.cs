@@ -4,6 +4,7 @@ using UnityEngine;
 using VanillaProfiler.Diagnostics;
 using VanillaProfiler.Overlay;
 using VanillaProfiler.Overlay.Modes;
+using VanillaProfiler.Output;
 
 namespace VanillaProfiler
 {

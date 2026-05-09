@@ -74,7 +74,9 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── IReportSink.cs                  Interface for reporting destinations
 │   ├── LogFileSink.cs                  Writes VanillaProfiler.log
 │   ├── ReportDispatcher.cs             Cold-path fan-out to sinks with per-sink failure isolation
-│   └── AtomicFileWriter.cs             Temp-file + rename helper for crash-safe writes
+│   ├── AtomicFileWriter.cs             Temp-file + rename helper for crash-safe writes
+│   ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt + bounded CSII_Report_*.zip support bundle
+│   └── SupportBundleWriter.cs          Zip bundle writer; returns path/throws, caller owns logging
 ├── Overlay/
 │   ├── IOverlayMode.cs                 Mode contract — adding a mode is purely additive (OCP)
 │   ├── OverlayTheme.cs                 Classic Gold palette + cached GUIStyles
@@ -113,7 +115,6 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
     ├── Recommendation.cs               DTO for a single recommendation (level + title + reason + action)
     ├── RecommendationEngine.cs         Builds recommendations from health + snapshot + probed settings — instance, takes GraphicsSettingsProbe via DI
     ├── CityContext.cs                  Static snapshot of in-game entity counts
-    ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt + bounded CSII_Report_*.zip support bundle
     ├── ReportTextSections.cs           Shared text sections (counter availability, top tables) for export and log
     ├── ProfilerSettings.cs             Immutable user-preferences DTO with .With(...) and .Normalize() — no I/O of its own
     ├── ProfilerSettingsSnapshot.cs     Point-in-time settings view passed through hot/cold boundaries (holds an immutable ProfilerSettings reference)
