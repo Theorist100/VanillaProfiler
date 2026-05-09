@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -15,9 +14,6 @@ namespace VanillaProfiler.Output
     public static class ReportExporter
     {
         private const int LOG_TAIL_LINES = 50;
-        private const double SUMMARY_HEAVY_SYSTEM_MS = 10.0;
-        private const double SUMMARY_HEAVY_MOD_MS = 10.0;
-        private const string PROFILER_MOD_NAME = "VanillaProfiler";
 
         public static ExportResult Export()
         {
@@ -69,7 +65,7 @@ namespace VanillaProfiler.Output
             sb.AppendLine($"Game version:     {Application.version}");
             sb.AppendLine($"Unity:            {Application.unityVersion}");
             sb.AppendLine();
-            AppendSummary(sb, snap, health);
+            ReportSummarySection.Append(sb, snap, health);
 
             sb.AppendLine("--- Scope of measurement ---");
             sb.AppendLine("  Top per-system numbers below use self/exclusive main-thread cost — scheduling");
@@ -93,105 +89,10 @@ namespace VanillaProfiler.Output
             AppendTopTables(sb, snap);
 
             sb.AppendLine($"--- Last {LOG_TAIL_LINES} lines of VanillaProfiler.log ---");
-            foreach (var line in TailPerfLog(LOG_TAIL_LINES))
+            foreach (var line in ReportLogTail.Read(Application.persistentDataPath, LOG_TAIL_LINES))
                 sb.AppendLine(line);
 
             return sb.ToString();
-        }
-
-        private static void AppendSummary(StringBuilder sb, OverlaySnapshot? snap, HealthReport? health)
-        {
-            sb.AppendLine("--- Summary ---");
-            if (snap == null || health == null)
-            {
-                sb.AppendLine("Overall:          No report window yet");
-                sb.AppendLine("Action:           Load a city and wait for the first report window.");
-                sb.AppendLine();
-                return;
-            }
-
-            sb.AppendLine($"Overall:          {health.Overall}");
-            sb.AppendLine($"Bottleneck:       {BottleneckText(health)} - {health.BottleneckHint}");
-            sb.AppendLine(Inv($"Frame:            {snap.AvgFps:F1} FPS avg, {snap.AvgFrameMs:F1} ms avg, {snap.MaxFrameMs:F1} ms max"));
-            sb.AppendLine($"Memory:           {health.MemoryLevel}, growth {health.GrowthLevel} ({health.MemoryHint})");
-            AppendSummaryTopMod(sb, snap);
-            AppendSummaryTopSystem(sb, snap);
-            sb.AppendLine(Inv($"Profiler cost:    {snap.ProfilerSelfMs:F2} ms/frame ({snap.ProfilerSelfPercent:F2}% of frame)"));
-            sb.AppendLine($"Action:           {SummaryAction(snap, health)}");
-            sb.AppendLine();
-        }
-
-        private static void AppendSummaryTopMod(StringBuilder sb, OverlaySnapshot snap)
-        {
-            if (TryFirstNonProfilerMod(snap.TopMods, out var top))
-                sb.AppendLine(Inv($"Top mod:          {top.ModName} - {top.TotalMs:F1} ms self in {WindowLabel(snap)}"));
-            else
-                sb.AppendLine("Top mod:          (none)");
-        }
-
-        private static void AppendSummaryTopSystem(StringBuilder sb, OverlaySnapshot snap)
-        {
-            if (TryFirstNonProfilerSystem(snap.TopModSystems, out var top))
-                sb.AppendLine(Inv($"Top mod system:   {top.Name} - {top.TotalMs:F1} ms self"));
-            else
-                sb.AppendLine("Top mod system:   (none)");
-        }
-
-        private static string SummaryAction(OverlaySnapshot snap, HealthReport health)
-        {
-            if (health.MemoryLevel == HealthLevel.Poor || health.GrowthLevel == HealthLevel.Poor)
-                return "Check managed memory growth first; compare another export after 60 seconds.";
-
-            if (TryFirstNonProfilerSystem(snap.TopModSystems, out var system) && system.TotalMs >= SUMMARY_HEAVY_SYSTEM_MS)
-                return $"Inspect {system.Name} first; it is the heaviest mod system in this window.";
-
-            if (TryFirstNonProfilerMod(snap.TopMods, out var mod) && mod.TotalMs >= SUMMARY_HEAVY_MOD_MS)
-                return $"Inspect {mod.ModName} first; it leads mod self-time in this window.";
-
-            if (health.Overall == HealthLevel.Good)
-                return "No obvious profiler-level problem in the last report window.";
-
-            return "Review Health and Top Mods/Systems below; no single mod system dominates this window.";
-        }
-
-        private static bool TryFirstNonProfilerMod(
-            IReadOnlyList<(string ModName, double TotalMs)>? mods,
-            out (string ModName, double TotalMs) value)
-        {
-            value = default;
-            if (mods == null || mods.Count == 0) return false;
-
-            for (int i = 0; i < mods.Count; i++)
-            {
-                var entry = mods[i];
-                if (string.IsNullOrEmpty(entry.ModName)) continue;
-                if (string.Equals(entry.ModName, PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
-                value = entry;
-                return true;
-            }
-
-            value = mods[0];
-            return !string.IsNullOrEmpty(value.ModName);
-        }
-
-        private static bool TryFirstNonProfilerSystem(
-            IReadOnlyList<(string Name, double TotalMs)>? systems,
-            out (string Name, double TotalMs) value)
-        {
-            value = default;
-            if (systems == null || systems.Count == 0) return false;
-
-            for (int i = 0; i < systems.Count; i++)
-            {
-                var entry = systems[i];
-                if (string.IsNullOrEmpty(entry.Name)) continue;
-                if (entry.Name.StartsWith(PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
-                value = entry;
-                return true;
-            }
-
-            value = systems[0];
-            return !string.IsNullOrEmpty(value.Name);
         }
 
         private static void AppendSystemInfo(StringBuilder sb)
@@ -289,98 +190,6 @@ namespace VanillaProfiler.Output
         private static void AppendTopTables(StringBuilder sb, OverlaySnapshot? snap)
         {
             ReportTextSections.AppendTopTables(sb, snap, WindowLabel(snap));
-        }
-
-        private static IEnumerable<string> TailPerfLog(int count)
-        {
-            try
-            {
-                if (count < 1) count = 1;
-                string path = LogFileSink.GetLogPath(Application.persistentDataPath);
-                if (!File.Exists(path))
-                    return new[] { $"  ({LogFileSink.LOG_FILENAME} not found)" };
-
-                const int CHUNK = 8192;
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                long length = stream.Length;
-                if (length == 0)
-                    return new[] { $"  ({LogFileSink.LOG_FILENAME} is empty)" };
-
-                long startOffset = FindTailStartOffset(stream, length, count, CHUNK);
-                string text = ReadUtf8From(stream, startOffset, length);
-                return LastLines(text, count);
-            }
-            catch (Exception ex)
-            {
-                return new[] { $"  (failed to read log: {ex.Message})" };
-            }
-        }
-
-        private static long FindTailStartOffset(FileStream stream, long length, int count, int chunkSize)
-        {
-            var buffer = new byte[chunkSize];
-            long scanEnd = length;
-            stream.Position = length - 1;
-            if (stream.ReadByte() == '\n')
-                scanEnd--;
-
-            long pos = scanEnd;
-            long startOffset = 0;
-            int newlines = 0;
-            while (pos > 0)
-            {
-                int readSize = (int)Math.Min(chunkSize, pos);
-                pos -= readSize;
-                stream.Position = pos;
-                int read = stream.Read(buffer, 0, readSize);
-                if (read <= 0) break;
-                if (TryFindTailOffset(buffer, read, pos, count, ref newlines, out startOffset))
-                    break;
-            }
-            return startOffset;
-        }
-
-        private static bool TryFindTailOffset(
-            byte[] buffer, int read, long chunkStart, int count, ref int newlines, out long offset)
-        {
-            offset = 0;
-            for (int i = read - 1; i >= 0; i--)
-            {
-                if (buffer[i] != (byte)'\n') continue;
-                newlines++;
-                if (newlines != count) continue;
-                offset = chunkStart + i + 1;
-                return true;
-            }
-            return false;
-        }
-
-        private static string ReadUtf8From(FileStream stream, long startOffset, long length)
-        {
-            int byteCount = checked((int)(length - startOffset));
-            var bytes = new byte[byteCount];
-            stream.Position = startOffset;
-            int total = 0;
-            while (total < byteCount)
-            {
-                int read = stream.Read(bytes, total, byteCount - total);
-                if (read <= 0) break;
-                total += read;
-            }
-            return Encoding.UTF8.GetString(bytes, 0, total);
-        }
-
-        private static IReadOnlyList<string> LastLines(string text, int count)
-        {
-            var raw = text.Split('\n');
-            int lineCount = raw.Length;
-            if (lineCount > 0 && raw[lineCount - 1].Length == 0)
-                lineCount--;
-            int first = Math.Max(0, lineCount - count);
-            var lines = new List<string>(lineCount - first);
-            for (int i = first; i < lineCount; i++)
-                lines.Add(raw[i].TrimEnd('\r'));
-            return lines;
         }
 
         private static string DeltaStr(double mb) => mb >= 0 ? Inv($"+{mb:F1} MB") : Inv($"{mb:F1} MB");
