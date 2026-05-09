@@ -186,7 +186,7 @@ namespace VanillaProfiler.Diagnostics
         private const double HEAVY_MOD_PERCENT = 0.10;
         private const string PROFILER_MOD_NAME = "VanillaProfiler";
 
-        private static (string ModName, double TotalMs, double Percent)? HeaviestNonProfilerMod(OverlaySnapshot snap)
+        private static HeaviestModCandidate? HeaviestNonProfilerMod(OverlaySnapshot snap)
         {
             if (snap.TopMods == null) return null;
             double windowMs = snap.WindowSeconds * 1000.0;
@@ -199,9 +199,23 @@ namespace VanillaProfiler.Diagnostics
                 if (string.Equals(entry.ModName, PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
                 double percent = entry.TotalMs / windowMs;
                 if (percent < HEAVY_MOD_PERCENT) continue;
-                return (entry.ModName, entry.TotalMs, percent);
+                return new HeaviestModCandidate(entry.ModName, entry.TotalMs, percent);
             }
             return null;
+        }
+
+        private readonly struct HeaviestModCandidate
+        {
+            public HeaviestModCandidate(string modName, double totalMs, double percent)
+            {
+                ModName = modName;
+                TotalMs = totalMs;
+                Percent = percent;
+            }
+
+            public string ModName { get; }
+            public double TotalMs { get; }
+            public double Percent { get; }
         }
     }
 }

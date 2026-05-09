@@ -95,49 +95,49 @@ namespace VanillaProfiler.Aggregation
                 MonoHeapBytes = raw.Mono,
                 NativeAllocBytes = raw.NativeAlloc,
                 NativeReservedBytes = raw.NativeReserved,
-                GfxUsedBytes = raw.GpuMemory,
-                AudioUsedBytes = raw.Audio,
-                SystemUsedBytes = raw.System,
-                GfxUsedAvailable = raw.GpuMemoryAvailable,
-                AudioUsedAvailable = raw.AudioAvailable,
-                SystemUsedAvailable = raw.SystemAvailable,
+                GfxUsedBytes = raw.GpuMemory.Value,
+                AudioUsedBytes = raw.Audio.Value,
+                SystemUsedBytes = raw.System.Value,
+                GfxUsedAvailable = raw.GpuMemory.Available,
+                AudioUsedAvailable = raw.Audio.Available,
+                SystemUsedAvailable = raw.System.Available,
                 ManagedDelta = raw.Managed - m_BaselineManaged,
                 MonoHeapDelta = raw.Mono - m_BaselineMonoHeap,
                 NativeAllocDelta = raw.NativeAlloc - m_BaselineNativeAlloc,
                 NativeReservedDelta = raw.NativeReserved - m_BaselineNativeReserved,
-                GfxUsedDelta = m_GfxBaselineCaptured ? raw.GpuMemory - m_BaselineGfxUsed : 0,
-                AudioUsedDelta = raw.Audio - m_BaselineAudioUsed,
+                GfxUsedDelta = m_GfxBaselineCaptured ? raw.GpuMemory.Value - m_BaselineGfxUsed : 0,
+                AudioUsedDelta = raw.Audio.Value - m_BaselineAudioUsed,
                 ManagedGrowthMBperSec = managedGrowthRate,
                 BaselineJustCaptured = baselineJustCaptured,
-                MainThreadCpuNs = timing.MainThread,
-                RenderThreadCpuNs = timing.RenderThread,
-                GpuFrameTimeNs = timing.GpuFrame,
-                PresentWaitNs = timing.PresentWait,
-                MainThreadCpuAvailable = timing.MainThreadAvailable,
-                RenderThreadCpuAvailable = timing.RenderThreadAvailable,
-                GpuFrameTimeAvailable = timing.GpuFrameAvailable,
-                PresentWaitAvailable = timing.PresentWaitAvailable,
-                DrawCallsCount = render.DrawCalls,
-                SetPassCallsCount = render.SetPass,
-                TrianglesCount = render.Triangles,
-                VerticesCount = render.Vertices,
-                ShadowCastersCount = render.ShadowCasters,
-                UsedBuffersBytes = render.BuffersBytes,
-                UsedBuffersCount = render.BuffersCount,
-                RenderTexturesBytes = render.RenderTexturesBytes,
-                DrawCallsAvailable = render.DrawCallsAvailable,
-                SetPassCallsAvailable = render.SetPassAvailable,
-                TrianglesAvailable = render.TrianglesAvailable,
-                VerticesAvailable = render.VerticesAvailable,
-                ShadowCastersAvailable = render.ShadowCastersAvailable,
-                UsedBuffersBytesAvailable = render.BuffersBytesAvailable,
-                UsedBuffersCountAvailable = render.BuffersCountAvailable,
-                RenderTexturesBytesAvailable = render.RenderTexturesBytesAvailable,
+                MainThreadCpuNs = timing.MainThread.Value,
+                RenderThreadCpuNs = timing.RenderThread.Value,
+                GpuFrameTimeNs = timing.GpuFrame.Value,
+                PresentWaitNs = timing.PresentWait.Value,
+                MainThreadCpuAvailable = timing.MainThread.Available,
+                RenderThreadCpuAvailable = timing.RenderThread.Available,
+                GpuFrameTimeAvailable = timing.GpuFrame.Available,
+                PresentWaitAvailable = timing.PresentWait.Available,
+                DrawCallsCount = render.DrawCalls.Value,
+                SetPassCallsCount = render.SetPass.Value,
+                TrianglesCount = render.Triangles.Value,
+                VerticesCount = render.Vertices.Value,
+                ShadowCastersCount = render.ShadowCasters.Value,
+                UsedBuffersBytes = render.BuffersBytes.Value,
+                UsedBuffersCount = render.BuffersCount.Value,
+                RenderTexturesBytes = render.RenderTexturesBytes.Value,
+                DrawCallsAvailable = render.DrawCalls.Available,
+                SetPassCallsAvailable = render.SetPass.Available,
+                TrianglesAvailable = render.Triangles.Available,
+                VerticesAvailable = render.Vertices.Available,
+                ShadowCastersAvailable = render.ShadowCasters.Available,
+                UsedBuffersBytesAvailable = render.BuffersBytes.Available,
+                UsedBuffersCountAvailable = render.BuffersCount.Available,
+                RenderTexturesBytesAvailable = render.RenderTexturesBytes.Available,
                 GcCollectTotalNs = gc.TotalNs,
                 GcCollectCount = gc.Count,
                 GcCollectAvailable = gc.Available,
-                AppResidentBytes = raw.AppResident,
-                AppResidentAvailable = raw.AppResidentAvailable,
+                AppResidentBytes = raw.AppResident.Value,
+                AppResidentAvailable = raw.AppResident.Available,
             };
         }
 
@@ -183,9 +183,9 @@ namespace VanillaProfiler.Aggregation
         private bool CaptureBaselines(RawMemoryCounters raw)
         {
             bool baselineJustCaptured = CaptureMemoryBaseline(raw);
-            if (!m_GfxBaselineCaptured && raw.GpuMemory > 0)
+            if (!m_GfxBaselineCaptured && raw.GpuMemory.Value > 0)
             {
-                m_BaselineGfxUsed = raw.GpuMemory;
+                m_BaselineGfxUsed = raw.GpuMemory.Value;
                 m_GfxBaselineCaptured = true;
             }
             return baselineJustCaptured;
@@ -198,7 +198,7 @@ namespace VanillaProfiler.Aggregation
             m_BaselineMonoHeap = raw.Mono;
             m_BaselineNativeAlloc = raw.NativeAlloc;
             m_BaselineNativeReserved = raw.NativeReserved;
-            m_BaselineAudioUsed = raw.Audio;
+            m_BaselineAudioUsed = raw.Audio.Value;
             m_BaselineCaptured = true;
             return true;
         }

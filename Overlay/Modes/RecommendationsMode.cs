@@ -39,7 +39,7 @@ namespace VanillaProfiler.Overlay.Modes
         // gets the snapshot. Health is recomputed each report cycle and exposed via
         // ProfilerHost; reading it here keeps the height in sync with what Draw uses.
         private static HealthReport LastHealth()
-            => ProfilerHost.TryGetReadSurface()?.LastHealth ?? new HealthReport();
+            => ProfilerHost.TryGetReadSurface()?.LastHealth ?? HealthReport.Unknown;
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {

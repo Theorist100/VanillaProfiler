@@ -26,8 +26,8 @@ namespace VanillaProfiler.Aggregation
             MetricsSample metrics, MemorySample memory, MemoryHistory history)
         {
             var snapshot = BuildSnapshot(metrics, memory);
-            double simPhaseMs = PhaseMs(metrics.Phases, SIM_PHASE_KEY, metrics.FrameCount);
-            double renderPhaseMs = PhaseMs(metrics.Phases, RENDER_PHASE_KEY, metrics.FrameCount);
+            double simPhaseMs = PhaseMs(metrics.Buckets.Phases, SIM_PHASE_KEY, metrics.FrameCount);
+            double renderPhaseMs = PhaseMs(metrics.Buckets.Phases, RENDER_PHASE_KEY, metrics.FrameCount);
             var health = HealthClassifier.Classify(snapshot, history, simPhaseMs, renderPhaseMs);
             return (snapshot, health);
         }
@@ -59,9 +59,9 @@ namespace VanillaProfiler.Aggregation
                 ManagedGrowthMBperSec = mem.ManagedGrowthMBperSec,
                 Spikes30fps = m.Spikes30,
                 Spikes20fps = m.Spikes20,
-                TopVanillaSystems = BuildTop(m.VanillaSystems, TOP_N),
-                TopModSystems = BuildTop(m.ModSystems, TOP_N),
-                TopMods = BuildTop(m.ModAggregate, TOP_N),
+                TopVanillaSystems = BuildTopSystems(m.Buckets.VanillaSystems, TOP_N),
+                TopModSystems = BuildTopSystems(m.Buckets.ModSystems, TOP_N),
+                TopMods = BuildTopMods(m.Buckets.ModAggregate, TOP_N),
                 ManagedMB = mem.ManagedBytes / BYTES_PER_MB,
                 ManagedDeltaMB = mem.ManagedDelta / BYTES_PER_MB,
                 ProfilerSelfMs = profilerMs,
@@ -124,14 +124,23 @@ namespace VanillaProfiler.Aggregation
         private static (double ms, double pct) ComputeProfilerSelfCost(MetricsSample m, double avgFrameMs)
         {
             if (m.FrameCount <= 0) return (0, 0);
-            if (!m.ModAggregate.TryGetValue(PROFILER_MOD_NAME, out var phase)) return (0, 0);
+            if (!m.Buckets.ModAggregate.TryGetValue(PROFILER_MOD_NAME, out var phase)) return (0, 0);
             double totalMs = phase.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
             double perFrameMs = totalMs / m.FrameCount;
             double pct = avgFrameMs > 0 ? (perFrameMs / avgFrameMs) * 100.0 : 0;
             return (perFrameMs, pct);
         }
 
-        private (string, double)[] BuildTop(IReadOnlyDictionary<string, PhaseData> systems, int n)
+        private SystemCostRow[] BuildTopSystems(IReadOnlyDictionary<string, PhaseData> systems, int n)
+            => BuildTop(systems, n, static (name, ms) => new SystemCostRow(name, ms));
+
+        private ModCostRow[] BuildTopMods(IReadOnlyDictionary<string, PhaseData> systems, int n)
+            => BuildTop(systems, n, static (name, ms) => new ModCostRow(name, ms));
+
+        private TRow[] BuildTop<TRow>(
+            IReadOnlyDictionary<string, PhaseData> systems,
+            int n,
+            Func<string, double, TRow> create)
         {
             m_SortBuffer.Clear();
             foreach (var kvp in systems) m_SortBuffer.Add(kvp);
@@ -148,14 +157,14 @@ namespace VanillaProfiler.Aggregation
                 take++;
             }
 
-            if (take == 0) return Array.Empty<(string, double)>();
+            if (take == 0) return Array.Empty<TRow>();
 
-            var result = new (string, double)[take];
+            var result = new TRow[take];
             for (int i = 0; i < take; i++)
             {
                 var kvp = m_SortBuffer[i];
                 double ms = kvp.Value.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
-                result[i] = (kvp.Key, ms);
+                result[i] = create(kvp.Key, ms);
             }
             return result;
         }

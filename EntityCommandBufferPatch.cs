@@ -117,7 +117,9 @@ namespace VanillaProfiler
             {
                 if (!measurement.Started || measurement.Completed) return;
                 measurement.Completed = true;
-                ProfilerHost.TryGetPatchSurface()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - measurement.StartTicks);
+                ProfilerHost.TryGetPatchSurface()?.RecordPhase(new PhaseMeasurement(
+                    ECB_KEY,
+                    Stopwatch.GetTimestamp() - measurement.StartTicks));
             }
             catch { /* profiler — never crash game */ }
         }

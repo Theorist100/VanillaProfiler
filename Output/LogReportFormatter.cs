@@ -25,12 +25,12 @@ namespace VanillaProfiler.Output
                 sb.AppendLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
             }
 
-            AppendPhaseTable(sb, metrics.Phases);
-            AppendSystemTable(sb, "TOP MODS (self main-thread cost)", metrics.ModAggregate, 10);
-            AppendSystemTable(sb, "VANILLA SYSTEMS — self main-thread cost (top 15)", metrics.VanillaSystems, 15);
-            AppendSystemTable(sb, "MOD SYSTEMS — self main-thread cost (top 15)", metrics.ModSystems, 15);
+            AppendPhaseTable(sb, metrics.Buckets.Phases);
+            AppendSystemTable(sb, "TOP MODS (self main-thread cost)", metrics.Buckets.ModAggregate, 10);
+            AppendSystemTable(sb, "VANILLA SYSTEMS — self main-thread cost (top 15)", metrics.Buckets.VanillaSystems, 15);
+            AppendSystemTable(sb, "MOD SYSTEMS — self main-thread cost (top 15)", metrics.Buckets.ModSystems, 15);
             AppendSystemTable(sb, "PATCHED VANILLA SYSTEMS — total Update ms (mod+vanilla split unknown)",
-                metrics.PatchedVanillaSystems, 15, useInclusiveAsPrimary: true);
+                metrics.Buckets.PatchedVanillaSystems, 15, useInclusiveAsPrimary: true);
             AppendMemorySection(sb, memory);
             AppendHealthSummary(sb, health);
             return sb.ToString();

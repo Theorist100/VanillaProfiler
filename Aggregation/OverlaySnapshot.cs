@@ -4,6 +4,32 @@ using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler
 {
+#pragma warning disable CA1815
+    public readonly struct SystemCostRow
+    {
+        public SystemCostRow(string name, double totalMs)
+        {
+            Name = name ?? string.Empty;
+            TotalMs = totalMs;
+        }
+
+        public string Name { get; }
+        public double TotalMs { get; }
+    }
+
+    public readonly struct ModCostRow
+    {
+        public ModCostRow(string modName, double totalMs)
+        {
+            ModName = modName ?? string.Empty;
+            TotalMs = totalMs;
+        }
+
+        public string ModName { get; }
+        public double TotalMs { get; }
+    }
+#pragma warning restore CA1815
+
     public sealed class ReplacedVanillaSystemRow
     {
         public ReplacedVanillaSystemRow(
@@ -37,14 +63,12 @@ namespace VanillaProfiler
         public double ManagedGrowthMBperSec { get; internal set; }
         public int Spikes30fps { get; internal set; }
         public int Spikes20fps { get; internal set; }
-        // Top rows use self/exclusive main-thread cost. Tuple member stays TotalMs
-        // for API stability inside the overlay/export code.
-        public IReadOnlyList<(string Name, double TotalMs)> TopVanillaSystems { get; internal set; }
-            = Array.Empty<(string, double)>();
-        public IReadOnlyList<(string Name, double TotalMs)> TopModSystems { get; internal set; }
-            = Array.Empty<(string, double)>();
-        public IReadOnlyList<(string ModName, double TotalMs)> TopMods { get; internal set; }
-            = Array.Empty<(string, double)>();
+        public IReadOnlyList<SystemCostRow> TopVanillaSystems { get; internal set; }
+            = Array.Empty<SystemCostRow>();
+        public IReadOnlyList<SystemCostRow> TopModSystems { get; internal set; }
+            = Array.Empty<SystemCostRow>();
+        public IReadOnlyList<ModCostRow> TopMods { get; internal set; }
+            = Array.Empty<ModCostRow>();
         public double ManagedMB { get; internal set; }
         public double ManagedDeltaMB { get; internal set; }
 

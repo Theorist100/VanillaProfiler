@@ -15,9 +15,9 @@ namespace VanillaProfiler
         bool IsVanillaSystemPatched(Type type);
         void OnSimTick();
         void OnFrame();
-        void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName = null);
-        void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks);
-        void RecordPhase(string name, long ticks);
+        void RecordSystem(ProfiledSystemMeasurement measurement);
+        void RecordPatchedVanilla(ProfiledSystemMeasurement measurement);
+        void RecordPhase(PhaseMeasurement measurement);
     }
 
     /// <summary>

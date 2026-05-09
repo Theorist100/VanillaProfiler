@@ -4,52 +4,50 @@ using UnityProfiler = UnityEngine.Profiling.Profiler;
 
 namespace VanillaProfiler.Aggregation
 {
+#pragma warning disable CA1815
+    internal readonly struct RecorderValue
+    {
+        public RecorderValue(long value, bool available)
+        {
+            Value = available ? value : 0;
+            Available = available;
+        }
+
+        public long Value { get; }
+        public bool Available { get; }
+    }
+#pragma warning restore CA1815
+
     internal struct RawMemoryCounters
     {
         public long Managed;
         public long Mono;
         public long NativeAlloc;
         public long NativeReserved;
-        public long GpuMemory;
-        public long Audio;
-        public long System;
-        public long AppResident;
-        public bool GpuMemoryAvailable;
-        public bool AudioAvailable;
-        public bool SystemAvailable;
-        public bool AppResidentAvailable;
+        public RecorderValue GpuMemory;
+        public RecorderValue Audio;
+        public RecorderValue System;
+        public RecorderValue AppResident;
     }
 
     internal struct FrameTimingCounters
     {
-        public long MainThread;
-        public long RenderThread;
-        public long GpuFrame;
-        public long PresentWait;
-        public bool MainThreadAvailable;
-        public bool RenderThreadAvailable;
-        public bool GpuFrameAvailable;
-        public bool PresentWaitAvailable;
+        public RecorderValue MainThread;
+        public RecorderValue RenderThread;
+        public RecorderValue GpuFrame;
+        public RecorderValue PresentWait;
     }
 
     internal struct RenderCounters
     {
-        public long DrawCalls;
-        public long SetPass;
-        public long Triangles;
-        public long Vertices;
-        public long ShadowCasters;
-        public long BuffersBytes;
-        public long BuffersCount;
-        public long RenderTexturesBytes;
-        public bool DrawCallsAvailable;
-        public bool SetPassAvailable;
-        public bool TrianglesAvailable;
-        public bool VerticesAvailable;
-        public bool ShadowCastersAvailable;
-        public bool BuffersBytesAvailable;
-        public bool BuffersCountAvailable;
-        public bool RenderTexturesBytesAvailable;
+        public RecorderValue DrawCalls;
+        public RecorderValue SetPass;
+        public RecorderValue Triangles;
+        public RecorderValue Vertices;
+        public RecorderValue ShadowCasters;
+        public RecorderValue BuffersBytes;
+        public RecorderValue BuffersCount;
+        public RecorderValue RenderTexturesBytes;
     }
 
     internal readonly struct GcRecorderSnapshot
@@ -115,7 +113,7 @@ namespace VanillaProfiler.Aggregation
         {
             long gpuMemory = UnityProfiler.GetAllocatedMemoryForGraphicsDriver();
             bool gpuMemoryAvailable = gpuMemory > 0 || m_VideoMemoryRecorder.Valid;
-            if (gpuMemory == 0) gpuMemory = ReadValid(m_VideoMemoryRecorder);
+            if (gpuMemory == 0) gpuMemory = ReadValue(m_VideoMemoryRecorder).Value;
 
             return new RawMemoryCounters
             {
@@ -123,14 +121,10 @@ namespace VanillaProfiler.Aggregation
                 Mono = UnityProfiler.GetMonoHeapSizeLong(),
                 NativeAlloc = UnityProfiler.GetTotalAllocatedMemoryLong(),
                 NativeReserved = UnityProfiler.GetTotalReservedMemoryLong(),
-                GpuMemory = gpuMemory,
-                Audio = ReadValid(m_AudioUsedRecorder),
-                System = ReadValid(m_SystemUsedRecorder),
-                AppResident = ReadValid(m_AppResidentRecorder),
-                GpuMemoryAvailable = gpuMemoryAvailable,
-                AudioAvailable = m_AudioUsedRecorder.Valid,
-                SystemAvailable = m_SystemUsedRecorder.Valid,
-                AppResidentAvailable = m_AppResidentRecorder.Valid,
+                GpuMemory = new RecorderValue(gpuMemory, gpuMemoryAvailable),
+                Audio = ReadValue(m_AudioUsedRecorder),
+                System = ReadValue(m_SystemUsedRecorder),
+                AppResident = ReadValue(m_AppResidentRecorder),
             };
         }
 
@@ -138,14 +132,10 @@ namespace VanillaProfiler.Aggregation
         {
             return new FrameTimingCounters
             {
-                MainThread = m_Samples.Average(m_MainThreadRecorder),
-                RenderThread = m_Samples.Average(m_RenderThreadRecorder),
-                GpuFrame = m_Samples.Average(m_GpuFrameTimeRecorder),
-                PresentWait = m_Samples.Average(m_PresentWaitRecorder),
-                MainThreadAvailable = m_MainThreadRecorder.Valid,
-                RenderThreadAvailable = m_RenderThreadRecorder.Valid,
-                GpuFrameAvailable = m_GpuFrameTimeRecorder.Valid,
-                PresentWaitAvailable = m_PresentWaitRecorder.Valid,
+                MainThread = ReadAverage(m_MainThreadRecorder),
+                RenderThread = ReadAverage(m_RenderThreadRecorder),
+                GpuFrame = ReadAverage(m_GpuFrameTimeRecorder),
+                PresentWait = ReadAverage(m_PresentWaitRecorder),
             };
         }
 
@@ -153,22 +143,14 @@ namespace VanillaProfiler.Aggregation
         {
             return new RenderCounters
             {
-                DrawCalls = ReadValid(m_DrawCallsRecorder),
-                SetPass = ReadValid(m_SetPassCallsRecorder),
-                Triangles = ReadValid(m_TrianglesRecorder),
-                Vertices = ReadValid(m_VerticesRecorder),
-                ShadowCasters = ReadValid(m_ShadowCastersRecorder),
-                BuffersBytes = ReadValid(m_UsedBuffersBytesRecorder),
-                BuffersCount = ReadValid(m_UsedBuffersCountRecorder),
-                RenderTexturesBytes = ReadValid(m_RenderTexturesBytesRecorder),
-                DrawCallsAvailable = m_DrawCallsRecorder.Valid,
-                SetPassAvailable = m_SetPassCallsRecorder.Valid,
-                TrianglesAvailable = m_TrianglesRecorder.Valid,
-                VerticesAvailable = m_VerticesRecorder.Valid,
-                ShadowCastersAvailable = m_ShadowCastersRecorder.Valid,
-                BuffersBytesAvailable = m_UsedBuffersBytesRecorder.Valid,
-                BuffersCountAvailable = m_UsedBuffersCountRecorder.Valid,
-                RenderTexturesBytesAvailable = m_RenderTexturesBytesRecorder.Valid,
+                DrawCalls = ReadValue(m_DrawCallsRecorder),
+                SetPass = ReadValue(m_SetPassCallsRecorder),
+                Triangles = ReadValue(m_TrianglesRecorder),
+                Vertices = ReadValue(m_VerticesRecorder),
+                ShadowCasters = ReadValue(m_ShadowCastersRecorder),
+                BuffersBytes = ReadValue(m_UsedBuffersBytesRecorder),
+                BuffersCount = ReadValue(m_UsedBuffersCountRecorder),
+                RenderTexturesBytes = ReadValue(m_RenderTexturesBytesRecorder),
             };
         }
 
@@ -257,6 +239,10 @@ namespace VanillaProfiler.Aggregation
             m_GcCollectRecorder.Dispose();
         }
 
-        private static long ReadValid(ProfilerRecorder recorder) => recorder.Valid ? recorder.LastValue : 0;
+        private RecorderValue ReadAverage(ProfilerRecorder recorder)
+            => new RecorderValue(m_Samples.Average(recorder), recorder.Valid);
+
+        private static RecorderValue ReadValue(ProfilerRecorder recorder)
+            => new RecorderValue(recorder.Valid ? recorder.LastValue : 0, recorder.Valid);
     }
 }

@@ -137,7 +137,9 @@ namespace VanillaProfiler
                 var profiler = ProfilerHost.TryGetPatchSurface();
                 if (profiler == null) return;
 
-                profiler.RecordPhase(PhaseName(phase), Stopwatch.GetTimestamp() - measurement.StartTicks);
+                profiler.RecordPhase(new PhaseMeasurement(
+                    PhaseName(phase),
+                    Stopwatch.GetTimestamp() - measurement.StartTicks));
 
                 // Track render FPS from Rendering phase (fires once per render frame).
                 if (emitFrame && phase == SystemUpdatePhase.Rendering)

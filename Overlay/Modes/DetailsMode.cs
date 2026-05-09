@@ -112,12 +112,21 @@ namespace VanillaProfiler.Overlay.Modes
             m_CachedReplacementRows = BuildReplacementRows(snapshot.ReplacedVanillaSystems, out m_CachedReplacementOverflow);
         }
 
-        private static IReadOnlyList<string> BuildTopRows(IReadOnlyList<(string Name, double TotalMs)> rows)
+        private static IReadOnlyList<string> BuildTopRows(IReadOnlyList<SystemCostRow> rows)
         {
             if (rows == null || rows.Count == 0) return Array.Empty<string>();
             var result = new string[rows.Count];
             for (int i = 0; i < rows.Count; i++)
                 result[i] = $"  {OverlayFormat.Truncate(rows[i].Name, 36),-36}  {rows[i].TotalMs,7:F1} ms";
+            return result;
+        }
+
+        private static IReadOnlyList<string> BuildTopRows(IReadOnlyList<ModCostRow> rows)
+        {
+            if (rows == null || rows.Count == 0) return Array.Empty<string>();
+            var result = new string[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+                result[i] = $"  {OverlayFormat.Truncate(rows[i].ModName, 36),-36}  {rows[i].TotalMs,7:F1} ms";
             return result;
         }
 
@@ -168,7 +177,7 @@ namespace VanillaProfiler.Overlay.Modes
                     ctx.Theme.DimStyle);
         }
 
-        private static bool HasItems(IReadOnlyCollection<(string, double)> rows) => rows != null && rows.Count > 0;
+        private static bool HasItems<T>(IReadOnlyCollection<T> rows) => rows != null && rows.Count > 0;
 
         private static string BottleneckText(HealthReport health)
         {

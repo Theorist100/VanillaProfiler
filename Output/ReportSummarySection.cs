@@ -67,8 +67,8 @@ namespace VanillaProfiler.Output
         }
 
         private static bool TryFirstNonProfilerMod(
-            IReadOnlyList<(string ModName, double TotalMs)>? mods,
-            out (string ModName, double TotalMs) value)
+            IReadOnlyList<ModCostRow>? mods,
+            out ModCostRow value)
         {
             value = default;
             if (mods == null || mods.Count == 0) return false;
@@ -87,8 +87,8 @@ namespace VanillaProfiler.Output
         }
 
         private static bool TryFirstNonProfilerSystem(
-            IReadOnlyList<(string Name, double TotalMs)>? systems,
-            out (string Name, double TotalMs) value)
+            IReadOnlyList<SystemCostRow>? systems,
+            out SystemCostRow value)
         {
             value = default;
             if (systems == null || systems.Count == 0) return false;

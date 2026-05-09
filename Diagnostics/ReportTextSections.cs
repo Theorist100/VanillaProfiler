@@ -49,13 +49,21 @@ namespace VanillaProfiler.Diagnostics
                $"SetPass={StatusShort(setPass)} " +
                $"GC={StatusShort(gc)}";
 
-        private static void AppendTopTable(
-            StringBuilder sb, string title, IReadOnlyList<(string Name, double TotalMs)> rows)
+        private static void AppendTopTable(StringBuilder sb, string title, IReadOnlyList<SystemCostRow> rows)
         {
             if (rows == null || rows.Count == 0) return;
             sb.AppendLine(title);
-            foreach (var (name, ms) in rows)
-                sb.AppendLine(Inv($"  {name,-40} {ms,8:F1} ms"));
+            for (int i = 0; i < rows.Count; i++)
+                sb.AppendLine(Inv($"  {rows[i].Name,-40} {rows[i].TotalMs,8:F1} ms"));
+            sb.AppendLine();
+        }
+
+        private static void AppendTopTable(StringBuilder sb, string title, IReadOnlyList<ModCostRow> rows)
+        {
+            if (rows == null || rows.Count == 0) return;
+            sb.AppendLine(title);
+            for (int i = 0; i < rows.Count; i++)
+                sb.AppendLine(Inv($"  {rows[i].ModName,-40} {rows[i].TotalMs,8:F1} ms"));
             sb.AppendLine();
         }
 

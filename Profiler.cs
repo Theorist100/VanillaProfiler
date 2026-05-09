@@ -32,8 +32,8 @@ namespace VanillaProfiler
 
         private readonly MetricsAggregator m_Metrics;
         private readonly MemorySampler m_Memory = new();
-        private readonly ReportBuilder m_Builder = new();
         private readonly ReportDispatcher m_Dispatcher;
+        private readonly ProfilerReportPipeline m_ReportPipeline;
         private readonly ReportScheduler m_Scheduler = new();
         private readonly SpikeScreenshot m_SpikeScreenshots = new();
         private readonly GraphicsSettingsProbe m_GraphicsSettings = new();
@@ -97,6 +97,7 @@ namespace VanillaProfiler
             MemoryHistory = new MemoryHistory(() => CurrentWindowContext.Settings);
             Recommendations = new RecommendationEngine(m_GraphicsSettings);
             m_Dispatcher = new ReportDispatcher(sinks);
+            m_ReportPipeline = new ProfilerReportPipeline(m_Dispatcher, this);
             m_Scheduler.Reset();
             m_Dispatcher.Initialize();
         }
@@ -140,11 +141,11 @@ namespace VanillaProfiler
         }
 
         /// <summary>Main thread (SystemBase.Update Harmony Postfix).</summary>
-        public void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName = null)
+        public void RecordSystem(ProfiledSystemMeasurement measurement)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordSystem));
             if (m_Disposed) return;
-            m_Metrics.RecordSystem(name, selfTicks, inclusiveTicks, isVanilla, modName);
+            m_Metrics.RecordSystem(measurement);
         }
 
         /// <summary>
@@ -154,19 +155,19 @@ namespace VanillaProfiler
         /// patch and vanilla original work, which is honest
         /// total cost but not attributable to either side.
         /// </summary>
-        public void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks)
+        public void RecordPatchedVanilla(ProfiledSystemMeasurement measurement)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordPatchedVanilla));
             if (m_Disposed) return;
-            m_Metrics.RecordPatchedVanilla(name, selfTicks, inclusiveTicks);
+            m_Metrics.RecordPatchedVanilla(measurement);
         }
 
         /// <summary>Main thread (UpdateSystem phase Postfix).</summary>
-        public void RecordPhase(string name, long ticks)
+        public void RecordPhase(PhaseMeasurement measurement)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordPhase));
             if (m_Disposed) return;
-            m_Metrics.RecordPhase(name, ticks);
+            m_Metrics.RecordPhase(measurement);
         }
 
         /// <summary>Main thread (Rendering phase Postfix). Drives the report cadence.</summary>
@@ -230,10 +231,18 @@ namespace VanillaProfiler
                     var memory = m_Memory.Sample(elapsedSec);
                     MemoryHistory.Record(memory.ManagedBytes, elapsedSec);
 
-                    var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
-                    AttachReplacementSnapshot(snapshot, metrics);
-                    PublishSnapshot(snapshot, health);
-                    WriteReports(metrics, memory, snapshot, health);
+                    var report = m_ReportPipeline.BuildAndWrite(
+                        m_ReportCount,
+                        metrics,
+                        memory,
+                        MemoryHistory,
+                        !m_ReplacementsLogged);
+
+                    ApplyLifecycleTransition(m_Session.Publish(report.Snapshot, report.Health));
+                    if (report.ReplacementsLogged)
+                    {
+                        m_ReplacementsLogged = true;
+                    }
                 }
             }
             finally
@@ -241,28 +250,6 @@ namespace VanillaProfiler
                 if (!m_Disposed)
                     BeginNextWindow();
             }
-        }
-
-        private void AttachReplacementSnapshot(
-            OverlaySnapshot snapshot,
-            MetricsSample metrics)
-        {
-            var replacements = metrics.WindowContext.Replacements;
-            snapshot.ReplacedVanillaSystems = ToReplacementRows(replacements, metrics.PatchedVanillaSystems);
-            if (m_ReplacementsLogged) return;
-            m_ReplacementsLogged = true;
-            SystemReplacementDetector.LogTo(this, replacements);
-        }
-
-        private void PublishSnapshot(OverlaySnapshot snapshot, HealthReport health)
-        {
-            m_Session.Publish(snapshot, health);
-        }
-
-        private void WriteReports(
-            MetricsSample metrics, MemorySample memory, OverlaySnapshot snapshot, HealthReport health)
-        {
-            m_Dispatcher.WriteReport(m_ReportCount, snapshot, health, metrics, memory);
         }
 
         /// <summary>Info-level system message routed to all sinks. Main thread.</summary>
@@ -278,24 +265,6 @@ namespace VanillaProfiler
         {
             if (m_Disposed) return;
             m_Dispatcher.WriteSystem(level, msg);
-        }
-
-        private static ReplacedVanillaSystemRow[] ToReplacementRows(
-            SystemReplacementDetector.ReplacementSnapshot snapshot,
-            System.Collections.Generic.IReadOnlyDictionary<string, Aggregation.PhaseData>? patchedMs)
-        {
-            var list = snapshot.Replacements;
-            if (list == null || list.Count == 0) return Array.Empty<ReplacedVanillaSystemRow>();
-            var arr = new ReplacedVanillaSystemRow[list.Count];
-            for (int i = 0; i < list.Count; i++)
-            {
-                var r = list[i];
-                double ms = 0.0;
-                if (patchedMs != null && patchedMs.TryGetValue(r.VanillaSystem, out var phase))
-                    ms = phase.InclusiveTicks * 1000.0 / Stopwatch.Frequency;
-                arr[i] = new ReplacedVanillaSystemRow(r.VanillaSystem, r.Owners, ms);
-            }
-            return arr;
         }
 
         private void ApplyLifecycleTransition(ProfilerLifecycleTransition transition)

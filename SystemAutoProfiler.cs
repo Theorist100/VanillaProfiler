@@ -24,9 +24,7 @@ namespace VanillaProfiler
     {
         private sealed class SystemInfo
         {
-            public string Name = string.Empty;
-            public bool IsVanilla;
-            public string ModName = string.Empty;
+            public ProfiledSystemIdentity Identity;
         }
 
         // Per-call state carried via Harmony __state. CS2 can synchronously call
@@ -129,17 +127,17 @@ namespace VanillaProfiler
                 var profiler = ProfilerHost.TryGetPatchSurface();
                 if (profiler == null) return;
 
-                if (info.IsVanilla)
+                if (info.Identity.IsVanilla)
                 {
                     if (profiler.IsVanillaSystemPatched(type))
                     {
-                        profiler.RecordPatchedVanilla(info.Name, selfTicks, elapsed);
+                        profiler.RecordPatchedVanilla(new ProfiledSystemMeasurement(info.Identity, selfTicks, elapsed));
                         return;
                     }
                     if (!profiler.ShouldProfileVanillaSystems) return;
                 }
 
-                profiler.RecordSystem(info.Name, selfTicks, elapsed, info.IsVanilla, info.ModName);
+                profiler.RecordSystem(new ProfiledSystemMeasurement(info.Identity, selfTicks, elapsed));
             }
             catch { /* profiler — never crash game */ }
         }
@@ -191,9 +189,10 @@ namespace VanillaProfiler
             // making things worse than the mod they're trying to diagnose.
             return new SystemInfo
             {
-                Name = name,
-                IsVanilla = identity.IsVanillaSystemOwner,
-                ModName = ModAttribution.FormatIdentity(identity),
+                Identity = new ProfiledSystemIdentity(
+                    name,
+                    identity.IsVanillaSystemOwner,
+                    ModAttribution.FormatIdentity(identity)),
             };
         }
     }
