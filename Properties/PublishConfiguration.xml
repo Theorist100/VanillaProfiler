@@ -68,17 +68,20 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.zip` and `CSII_Report_*.txt` in your Reports folder
 3. Attach the `.zip` when possible, otherwise attach the `.txt` — it includes system info, loaded mods, current settings, the latest report window, top mods, and the last 50 lines of VanillaProfiler.log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.5.4" />
+  <ModVersion Value="1.6.0" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>Top Mods and Top Systems now report self/exclusive main-thread cost, so nested SystemBase.Update calls are no longer double-counted. Numbers can be lower than previous releases; that is expected and more mathematically correct.
-VanillaProfiler.log now shows SELF and INCL columns for system tables. Patched-vanilla rows still use total Update ms because the prefix/original split is not measurable.
-Ctrl+F11 now writes both CSII_Report_*.txt and a bounded CSII_Report_*.zip support bundle with settings and log context.
-Replacement detection now uses a deduplicated per-Type snapshot refreshed at lifecycle boundaries and at the start of each report window, so patched-vanilla routing and report output read the same state.
-Mod attribution now carries confidence/origin data and keeps Harmony owner ids separate from patch assembly names.
-Overlay read access now exposes DTOs and commands instead of live profiler internals, hotkeys follow a semantic command policy while settings are open, and persisted overlay modes use stable ids.
-Recommendation thresholds now scale with the report window, terrain-shadow advice only appears when the setting is actually detected as enabled, and Ctrl+F11 report/bundle writing lives in the output layer.
-Session lifecycle resets now initialize correctly when the mod is reloaded inside an already loaded city, and long pauses reset memory-growth history instead of producing false leak spikes.</ChangeLog>
+  <ChangeLog>Session lifecycle is now token-based: each window carries an explicit session/load id, duplicate settling callbacks no-op, and dispose no longer cycles recorders through a boundary reset.
+Reports drain metrics with the replacement and settings context that was active for that window, then prepare the next context after writing — old samples can no longer be labelled with state scanned afterwards.
+Patched-vanilla detection now treats prefixes, postfixes, transpilers and finalizers as replacement evidence, and Harmony owner ids are tracked separately from patch assembly identity.
+Mod attribution rebuilt around structured origin/confidence data; trusted vanilla owners are not downgraded by hot-path fallbacks.
+System, ECB and UpdateSystem patch timings use explicit started/completed measurement tokens, so default Harmony state cannot produce fake samples.
+Overlay rebuilt around a semantic command contract with stable persisted mode ids; long Details/Engine/Recommendations bodies scroll under a fixed header, and Reset Defaults returns manual panel positions to the anchor preset.
+Spike screenshots are now off by default — enable them with Ctrl+F7 or in Settings when you need capture evidence for repeated stutters.
+Tips no longer suggest Max Frame Latency for true GPU-bound or present-wait cases; that advice is now reserved for CPU-render-bound GPU underutilization.
+Engine counter UI shows n/a for unavailable Unity profiler markers instead of confusing them with real zero values, and counter availability is surfaced in support exports.
+Long pauses now reset the managed-memory leak window instead of clamping elapsed time into a false growth rate.
+Harmony conflict log refreshes when the patch signature changes, instead of being logged once per session.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>
