@@ -1,81 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using Game.Modding;
 
 namespace VanillaProfiler.Diagnostics
 {
-    public enum AttributionConfidence
-    {
-        Unknown = 0,
-        AssemblyName,
-        HarmonyOwnerId,
-        TrustedRuntimeAssembly,
-        ModType,
-        ProfilerSelf,
-    }
-
-    public enum AssemblyOrigin
-    {
-        Unknown = 0,
-        TrustedGame,
-        TrustedUnity,
-        TrustedFramework,
-        Profiler,
-        PlayerMod,
-    }
-
-    [SuppressMessage("Usage", "CA1815:Override equals and operator equals on value types", Justification = "Identity values are cached and formatted, not compared as value objects.")]
-    [StructLayout(LayoutKind.Auto)]
-    public readonly struct ModIdentity
-    {
-        public ModIdentity(
-            string displayName,
-            string assemblyName,
-            string assemblyPath,
-            AssemblyOrigin origin,
-            AttributionConfidence confidence,
-            bool isVanillaSystemOwner)
-        {
-            DisplayName = displayName ?? ModAttribution.UNKNOWN;
-            AssemblyName = assemblyName ?? string.Empty;
-            AssemblyPath = assemblyPath ?? string.Empty;
-            Origin = origin;
-            Confidence = confidence;
-            IsVanillaSystemOwner = isVanillaSystemOwner;
-        }
-
-        public readonly string DisplayName;
-        public readonly string AssemblyName;
-        public readonly string AssemblyPath;
-        public readonly AssemblyOrigin Origin;
-        public readonly AttributionConfidence Confidence;
-        public readonly bool IsVanillaSystemOwner;
-    }
-
-    [SuppressMessage("Usage", "CA1815:Override equals and operator equals on value types", Justification = "Patch owner values are evidence carriers, not compared as value objects.")]
-    [StructLayout(LayoutKind.Auto)]
-    public readonly struct PatchOwnerIdentity
-    {
-        public PatchOwnerIdentity(
-            ModIdentity patchAssembly,
-            string harmonyOwnerId,
-            AttributionConfidence confidence)
-        {
-            PatchAssembly = patchAssembly;
-            HarmonyOwnerId = harmonyOwnerId ?? string.Empty;
-            Confidence = confidence;
-        }
-
-        public readonly ModIdentity PatchAssembly;
-        public readonly string HarmonyOwnerId;
-        public readonly AttributionConfidence Confidence;
-    }
-
     /// <summary>
     /// Maps runtime types and assemblies to owning mod identities with evidence.
     /// Harmony Postfix on SystemBase.Update runs on the main thread, so caches are
@@ -212,7 +143,7 @@ namespace VanillaProfiler.Diagnostics
             string assemblyName = SafeAssemblyName(type.Assembly);
             string assemblyPath = SafeAssemblyPath(type.Assembly);
 
-            if (HasPrefixSegment(ns, PROFILER))
+            if (AssemblyClassification.HasPrefixSegment(ns, PROFILER))
                 return new ModIdentity(
                     PROFILER,
                     assemblyName,
@@ -222,7 +153,7 @@ namespace VanillaProfiler.Diagnostics
                     isVanillaSystemOwner: false);
 
             var assemblyIdentity = ResolveAssembly(type.Assembly, allowReflection);
-            bool vanillaNamespace = HasTrustedRuntimeNamespace(ns);
+            bool vanillaNamespace = AssemblyClassification.HasTrustedRuntimeNamespace(ns);
             bool isVanillaOwner = assemblyIdentity.IsVanillaSystemOwner && vanillaNamespace;
             if (assemblyIdentity.IsVanillaSystemOwner == isVanillaOwner)
                 return assemblyIdentity;
@@ -255,7 +186,7 @@ namespace VanillaProfiler.Diagnostics
             string assemblyName = SafeAssemblyName(asm);
             string assemblyPath = SafeAssemblyPath(asm);
 
-            if (HasPrefixSegment(assemblyName, PROFILER))
+            if (AssemblyClassification.HasPrefixSegment(assemblyName, PROFILER))
             {
                 return new ModIdentity(
                     PROFILER,
@@ -266,7 +197,7 @@ namespace VanillaProfiler.Diagnostics
                     isVanillaSystemOwner: false);
             }
 
-            var origin = DetermineOrigin(assemblyName, assemblyPath);
+            var origin = AssemblyClassification.DetermineOrigin(assemblyName, assemblyPath);
             if (origin == AssemblyOrigin.TrustedGame || origin == AssemblyOrigin.TrustedUnity)
             {
                 return new ModIdentity(
@@ -338,56 +269,6 @@ namespace VanillaProfiler.Diagnostics
         private static ModIdentity Better(ModIdentity current, ModIdentity next)
             => next.Confidence > current.Confidence ? next : current;
 
-        [SuppressMessage("Usage", "CA2249:Consider using string.Contains instead of string.IndexOf", Justification = ".NET Framework 4.8 target does not expose string.Contains with StringComparison.")]
-        private static AssemblyOrigin DetermineOrigin(string assemblyName, string assemblyPath)
-        {
-            if (string.IsNullOrEmpty(assemblyPath))
-                return AssemblyOrigin.Unknown;
-
-            if (IsTrustedGameAssemblyName(assemblyName) && IsUnderManagedRuntimePath(assemblyPath))
-                return AssemblyOrigin.TrustedGame;
-
-            if (IsTrustedUnityAssemblyName(assemblyName) && IsUnderManagedRuntimePath(assemblyPath))
-                return AssemblyOrigin.TrustedUnity;
-
-            if (IsFrameworkAssemblyName(assemblyName) && IsUnderManagedRuntimePath(assemblyPath))
-                return AssemblyOrigin.TrustedFramework;
-
-            if (assemblyPath.IndexOf("\\Mods\\", StringComparison.OrdinalIgnoreCase) >= 0)
-                return AssemblyOrigin.PlayerMod;
-
-            return AssemblyOrigin.Unknown;
-        }
-
-        [SuppressMessage("Usage", "CA2249:Consider using string.Contains instead of string.IndexOf", Justification = ".NET Framework 4.8 target does not expose string.Contains with StringComparison.")]
-        private static bool IsUnderManagedRuntimePath(string path)
-        {
-            string normalized = path.Replace('/', '\\');
-            return normalized.IndexOf("\\Cities2_Data\\Managed\\", StringComparison.OrdinalIgnoreCase) >= 0
-                || normalized.IndexOf("\\Reference Assemblies\\Microsoft\\Framework\\", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static bool IsTrustedGameAssemblyName(string assemblyName)
-            => HasPrefixSegment(assemblyName, "Game")
-                || HasPrefixSegment(assemblyName, "Colossal");
-
-        private static bool IsTrustedUnityAssemblyName(string assemblyName)
-            => HasPrefixSegment(assemblyName, "Unity")
-                || HasPrefixSegment(assemblyName, "UnityEngine");
-
-        private static bool IsFrameworkAssemblyName(string assemblyName)
-            => string.Equals(assemblyName, "mscorlib", StringComparison.Ordinal)
-                || string.Equals(assemblyName, "System", StringComparison.Ordinal)
-                || HasPrefixSegment(assemblyName, "System")
-                || string.Equals(assemblyName, "netstandard", StringComparison.Ordinal)
-                || HasPrefixSegment(assemblyName, "Microsoft");
-
-        private static bool HasTrustedRuntimeNamespace(string ns)
-            => HasPrefixSegment(ns, "Game")
-                || HasPrefixSegment(ns, "Unity")
-                || HasPrefixSegment(ns, "UnityEngine")
-                || HasPrefixSegment(ns, "Colossal");
-
         private static string SafeAssemblyName(Assembly? asm)
             => asm?.GetName().Name ?? string.Empty;
 
@@ -406,11 +287,5 @@ namespace VanillaProfiler.Diagnostics
                 AssemblyOrigin.Unknown,
                 AttributionConfidence.Unknown,
                 isVanillaSystemOwner: false);
-
-        public static bool HasPrefixSegment(string value, string prefix)
-        {
-            return string.Equals(value, prefix, StringComparison.Ordinal)
-                || value.StartsWith(prefix + ".", StringComparison.Ordinal);
-        }
     }
 }
