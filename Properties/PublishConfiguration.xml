@@ -67,7 +67,7 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.txt` in your Reports folder
 3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.5.3" />
+  <ModVersion Value="1.5.4" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
@@ -76,6 +76,7 @@ VanillaProfiler.log now shows SELF and INCL columns for system tables. Patched-v
 Replacement detection now uses a deduplicated per-Type snapshot refreshed at lifecycle boundaries and at the start of each report window, so patched-vanilla routing and report output read the same state.
 Overlay read access now exposes DTOs and commands instead of live profiler internals, and the main overlay header stays fixed while long mode bodies scroll.
 Recommendation thresholds now scale with the report window, terrain-shadow advice only appears when the setting is actually detected as enabled, and Ctrl+F11 report/bundle writing lives in the output layer.
+Cold-path cleanup now reuses drained metric buffers, early startup logs flush consistently after profiler registration, and stutter classification uses spike density over the report window instead of a single max frame alone.
 Session lifecycle resets now initialize correctly when the mod is reloaded inside an already loaded city, and long pauses reset memory-growth history instead of producing false leak spikes.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

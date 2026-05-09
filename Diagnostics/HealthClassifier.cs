@@ -216,8 +216,10 @@ namespace VanillaProfiler.Diagnostics
                 window = 5.0;
 
             double spikesPer5s = spikes30 * 5.0 / window;
-            if (maxFrameMs >= FRAME_POOR_MS || spikesPer5s > SPIKES_POOR) return HealthLevel.Poor;
-            if (maxFrameMs >= FRAME_GOOD_MS || spikesPer5s >= SPIKES_OK) return HealthLevel.Ok;
+            bool hasPattern = spikesPer5s >= SPIKES_OK;
+            if (spikesPer5s > SPIKES_POOR) return HealthLevel.Poor;
+            if (hasPattern && maxFrameMs >= FRAME_POOR_MS) return HealthLevel.Poor;
+            if (hasPattern || maxFrameMs >= FRAME_GOOD_MS) return HealthLevel.Ok;
             return HealthLevel.Good;
         }
 
