@@ -60,24 +60,60 @@ namespace VanillaProfiler.Diagnostics
         public bool Clamp()
         {
             bool changed = false;
+            changed |= ClampReportSettings();
+            changed |= ClampOverlaySettings();
+            changed |= ClampSpikeSettings();
+            changed |= ClampThresholdSettings();
+            changed |= ClampUiSettings();
+            return changed;
+        }
+
+        public ProfilerSettings Clone()
+            => (ProfilerSettings)MemberwiseClone();
+
+        private bool ClampReportSettings()
+        {
+            bool changed = false;
             if (float.IsNaN(ReportIntervalSec) || float.IsInfinity(ReportIntervalSec))
                 changed |= Set(ref ReportIntervalSec, 5f);
             if (ReportIntervalSec < 1f) changed |= Set(ref ReportIntervalSec, 1f);
             if (ReportIntervalSec > 60f) changed |= Set(ref ReportIntervalSec, 60f);
+            return changed;
+        }
+
+        private bool ClampOverlaySettings()
+        {
+            bool changed = false;
             if (DefaultMode < 0 || DefaultMode > 5) changed |= Set(ref DefaultMode, 0);
             if (Anchor < 0 || Anchor > 3) changed |= Set(ref Anchor, 0);
             if (SparklineWidth < 10) changed |= Set(ref SparklineWidth, 10);
             if (SparklineWidth > 60) changed |= Set(ref SparklineWidth, 60);
+            return changed;
+        }
+
+        private bool ClampSpikeSettings()
+        {
+            bool changed = false;
             if (float.IsNaN(SpikeThresholdMs) || float.IsInfinity(SpikeThresholdMs))
                 changed |= Set(ref SpikeThresholdMs, 100f);
             if (SpikeThresholdMs < 33f) changed |= Set(ref SpikeThresholdMs, 33f);
             if (SpikeThresholdMs > 1000f) changed |= Set(ref SpikeThresholdMs, 1000f);
+            return changed;
+        }
 
+        private bool ClampThresholdSettings()
+        {
+            bool changed = false;
             if (float.IsNaN(SyncPointThresholdMs) || float.IsInfinity(SyncPointThresholdMs))
                 changed |= Set(ref SyncPointThresholdMs, 0.5f);
             if (SyncPointThresholdMs < 0.05f) changed |= Set(ref SyncPointThresholdMs, 0.05f);
             if (SyncPointThresholdMs > 10f) changed |= Set(ref SyncPointThresholdMs, 10f);
+            return changed;
+        }
 
+        private bool ClampUiSettings()
+        {
+            bool changed = false;
             if (float.IsNaN(UiScale) || float.IsInfinity(UiScale))
                 changed |= Set(ref UiScale, 0f);
             // 0 (auto) is the only "off" sentinel; any positive value is a manual scale

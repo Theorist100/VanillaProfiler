@@ -1,69 +1,72 @@
 using System;
+using System.Collections.Generic;
 
 namespace VanillaProfiler
 {
     /// <summary>
-    /// Immutable view of the last reporting window. Read by overlay, exporter, and tests.
-    /// Built by ReportBuilder — never mutated after construction.
+    /// Read-only view of the last reporting window. Built by ReportBuilder and
+    /// then published to overlay/export consumers.
     /// </summary>
     public sealed class OverlaySnapshot
     {
-        public double AvgFps;
-        public float WindowSeconds;
-        public double MinFps;
-        public double AvgFrameMs;
-        public double MaxFrameMs;
-        public double SimTicksPerSec;
-        public double ManagedGrowthMBperSec;
-        public int Spikes30fps;
-        public int Spikes20fps;
-        public (string Name, double TotalMs)[] TopVanillaSystems;
-        public (string Name, double TotalMs)[] TopModSystems;
-        public (string ModName, double TotalMs)[] TopMods;
-        public double ManagedMB;
-        public double ManagedDeltaMB;
+        public double AvgFps { get; internal set; }
+        public float WindowSeconds { get; internal set; }
+        public double MinFps { get; internal set; }
+        public double AvgFrameMs { get; internal set; }
+        public double MaxFrameMs { get; internal set; }
+        public double SimTicksPerSec { get; internal set; }
+        public double ManagedGrowthMBperSec { get; internal set; }
+        public int Spikes30fps { get; internal set; }
+        public int Spikes20fps { get; internal set; }
+        public IReadOnlyList<(string Name, double TotalMs)> TopVanillaSystems { get; internal set; }
+            = Array.Empty<(string, double)>();
+        public IReadOnlyList<(string Name, double TotalMs)> TopModSystems { get; internal set; }
+            = Array.Empty<(string, double)>();
+        public IReadOnlyList<(string ModName, double TotalMs)> TopMods { get; internal set; }
+            = Array.Empty<(string, double)>();
+        public double ManagedMB { get; internal set; }
+        public double ManagedDeltaMB { get; internal set; }
 
-        // Profiler's own measured cost over the window. Always populated so the
-        // overlay can advertise "we cost X ms / Y%" up front and players can see
-        // for themselves that the profiler isn't the bottleneck.
-        public double ProfilerSelfMs;
-        public double ProfilerSelfPercent;
+        public double ProfilerSelfMs { get; internal set; }
+        public double ProfilerSelfPercent { get; internal set; }
 
-        // Extra memory + CPU categories sourced from Unity's ProfilerRecorder
-        // (Gfx/Audio used; main + render thread frame time). 0 when the platform
-        // doesn't expose the marker — caller should branch on > 0 to render.
-        public double GfxUsedMB;
-        public double AudioUsedMB;
-        public double MainThreadCpuMs;
-        public double RenderThreadCpuMs;
-        public double GpuFrameTimeMs;
-        public double PresentWaitMs;
+        public double GfxUsedMB { get; internal set; }
+        public double AudioUsedMB { get; internal set; }
+        public double MainThreadCpuMs { get; internal set; }
+        public double RenderThreadCpuMs { get; internal set; }
+        public double GpuFrameTimeMs { get; internal set; }
+        public double PresentWaitMs { get; internal set; }
+        public bool GfxUsedAvailable { get; internal set; }
+        public bool AudioUsedAvailable { get; internal set; }
+        public bool MainThreadCpuAvailable { get; internal set; }
+        public bool RenderThreadCpuAvailable { get; internal set; }
+        public bool GpuFrameTimeAvailable { get; internal set; }
+        public bool PresentWaitAvailable { get; internal set; }
 
-        // Render-pipeline counts and GPU memory breakdown surfaced by the new
-        // engine-counters set. All optional — a recorder stripped on this build
-        // simply leaves the field at 0.
-        public long DrawCalls;
-        public long SetPassCalls;
-        public long Triangles;
-        public long Vertices;
-        public long ShadowCasters;
-        public double UsedBuffersMB;
-        public long UsedBuffersCount;
-        public double RenderTexturesMB;
-        public double GcCollectStallMs;
-        public long GcCollectCount;
-        public double AppResidentMB;
+        public long DrawCalls { get; internal set; }
+        public long SetPassCalls { get; internal set; }
+        public long Triangles { get; internal set; }
+        public long Vertices { get; internal set; }
+        public long ShadowCasters { get; internal set; }
+        public bool DrawCallsAvailable { get; internal set; }
+        public bool SetPassCallsAvailable { get; internal set; }
+        public bool TrianglesAvailable { get; internal set; }
+        public bool VerticesAvailable { get; internal set; }
+        public bool ShadowCastersAvailable { get; internal set; }
+        public double UsedBuffersMB { get; internal set; }
+        public long UsedBuffersCount { get; internal set; }
+        public double RenderTexturesMB { get; internal set; }
+        public bool UsedBuffersBytesAvailable { get; internal set; }
+        public bool UsedBuffersCountAvailable { get; internal set; }
+        public bool RenderTexturesBytesAvailable { get; internal set; }
+        public double GcCollectStallMs { get; internal set; }
+        public long GcCollectCount { get; internal set; }
+        public bool GcCollectAvailable { get; internal set; }
+        public double AppResidentMB { get; internal set; }
+        public bool SystemUsedAvailable { get; internal set; }
+        public bool AppResidentAvailable { get; internal set; }
 
-        // Vanilla systems whose OnUpdate has a foreign Harmony prefix. Always
-        // set (Array.Empty when nothing was detected) so overlay code can
-        // branch on .Length without a null guard. Scanned by
-        // SystemReplacementDetector once per report cycle. TotalMs is the
-        // SystemBase.Update elapsed time accumulated during the window —
-        // measured unconditionally (independent of ProfileVanillaSystems).
-        // The ms blends the patching mod's prefix with the vanilla original
-        // because Harmony does not let us split them; surfacing the total is
-        // honest and beats hiding the cost.
-        public (string VanillaSystem, string OwnerMod, double TotalMs)[] ReplacedVanillaSystems
+        public IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> ReplacedVanillaSystems { get; internal set; }
             = Array.Empty<(string, string, double)>();
     }
 }

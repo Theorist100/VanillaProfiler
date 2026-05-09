@@ -10,14 +10,16 @@ namespace VanillaProfiler
     /// </summary>
     public static class ProfilerHost
     {
-        private static Profiler s_Current;
+        private static Profiler? s_Current;
 
         /// <summary>
         /// Atomic read of the current Profiler instance. Returns null if not registered or
         /// already unregistered. Callers MUST capture the result into a local before use,
         /// otherwise the Unregister-then-call race re-emerges.
         /// </summary>
-        public static Profiler TryGet() => Volatile.Read(ref s_Current);
+        public static Profiler? TryGet() => Volatile.Read(ref s_Current);
+
+        public static IProfilerHotPath? TryGetHotPath() => Volatile.Read(ref s_Current);
 
         /// <summary>Throws if accessed outside Register..Unregister window. Prefer TryGet().</summary>
         public static Profiler Current

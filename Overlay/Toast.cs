@@ -12,7 +12,7 @@ namespace VanillaProfiler.Overlay
         private const float WIDTH = 440f;
 
         private float m_HideAt;
-        private string m_Text;
+        private string m_Text = string.Empty;
 
         public void Show(string message)
         {

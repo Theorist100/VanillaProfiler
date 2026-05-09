@@ -16,15 +16,15 @@ namespace VanillaProfiler.Overlay
         /// </summary>
         public static float DrawTextField(
             OverlayTheme theme, float lx, float ly,
-            string label, ref string buffer, Action onChanged,
-            string rangeHint = null)
+            string label, ref string buffer, Action? onChanged,
+            string? rangeHint = null)
         {
             GUI.Label(new Rect(lx, ly, 160f, OverlayPanel.LINE_H), label, theme.BodyStyle);
             string updated = GUI.TextField(
                 new Rect(lx + 170f, ly, 80f, OverlayPanel.LINE_H),
-                buffer ?? "",
+                buffer,
                 theme.TextFieldStyle);
-            if (updated != buffer)
+            if (!string.Equals(updated, buffer, StringComparison.Ordinal))
             {
                 buffer = updated;
                 onChanged?.Invoke();
@@ -58,6 +58,30 @@ namespace VanillaProfiler.Overlay
                 }
             }
             return result;
+        }
+
+        public static float DrawToggleRow(
+            OverlayTheme theme, float lx, float ly, float fw,
+            bool current, string label, Action<bool> onChanged, float bottomGap = 4f)
+        {
+            bool updated = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                current, label, theme.ToggleStyle);
+            if (updated != current) onChanged(updated);
+            return ly + OverlayPanel.LINE_H + bottomGap;
+        }
+
+        public static float DrawSegmentedRow(
+            OverlayTheme theme, float lx, float ly, float fw,
+            string label, int current, string[] labels, Action<int> onChanged)
+        {
+            GUI.Label(new Rect(lx, ly, 110f, OverlayPanel.LINE_H), label, theme.BodyStyle);
+            int next = DrawSegmented(
+                theme,
+                new Rect(lx + 120f, ly, fw - 120f, OverlayPanel.LINE_H),
+                current,
+                labels);
+            if (next != current) onChanged(next);
+            return ly + OverlayPanel.LINE_H + 4f;
         }
     }
 }

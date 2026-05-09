@@ -29,7 +29,7 @@ namespace VanillaProfiler.Diagnostics
         private static readonly Dictionary<Assembly, string> s_AssemblyCache = new();
 
         /// <summary>Returns mod name for a given system type. Never null, never throws.</summary>
-        public static string Resolve(Type type)
+        public static string Resolve(Type? type)
         {
             if (type == null) return UNKNOWN;
             if (s_TypeCache.TryGetValue(type, out var modName))
@@ -58,7 +58,7 @@ namespace VanillaProfiler.Diagnostics
         }
 
         /// <summary>Returns true when the type belongs to the base game (Game/Unity/Colossal namespaces).</summary>
-        public static bool IsVanilla(Type type)
+        public static bool IsVanilla(Type? type)
         {
             if (type == null) return false;
             var ns = type.Namespace ?? string.Empty;
@@ -69,13 +69,15 @@ namespace VanillaProfiler.Diagnostics
         }
 
         /// <summary>Snapshot of all loaded mod names (excluding Vanilla and VanillaProfiler).</summary>
-        public static List<string> GetLoadedMods()
+        public static IReadOnlyList<string> GetLoadedMods()
         {
             var result = new List<string>();
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 string name = TryGetModAssemblyName(asm);
-                if (name == VANILLA || name == PROFILER || name == UNKNOWN) continue;
+                if (string.Equals(name, VANILLA, StringComparison.Ordinal)
+                    || string.Equals(name, PROFILER, StringComparison.Ordinal)
+                    || string.Equals(name, UNKNOWN, StringComparison.Ordinal)) continue;
                 if (!result.Contains(name)) result.Add(name);
             }
             result.Sort(StringComparer.Ordinal);
@@ -99,7 +101,7 @@ namespace VanillaProfiler.Diagnostics
             return ResolveAssembly(type.Assembly, allowReflection: false);
         }
 
-        private static string ResolveAssembly(Assembly asm, bool allowReflection)
+        private static string ResolveAssembly(Assembly? asm, bool allowReflection)
         {
             if (asm == null) return UNKNOWN;
             if (s_AssemblyCache.TryGetValue(asm, out var modName))
@@ -156,7 +158,7 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
-        private static string FallbackAssemblyName(Assembly asm)
+        private static string FallbackAssemblyName(Assembly? asm)
         {
             string asmName = asm?.GetName().Name ?? UNKNOWN;
             return IsVanillaAssemblyName(asmName) ? VANILLA : asmName;
@@ -175,7 +177,7 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
-        private static Type FindModType(Assembly asm)
+        private static Type? FindModType(Assembly? asm)
         {
             if (asm == null) return null;
             return asm.GetTypes()

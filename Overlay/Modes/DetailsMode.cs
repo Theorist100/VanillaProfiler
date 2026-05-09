@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Overlay.Modes
@@ -30,11 +31,11 @@ namespace VanillaProfiler.Overlay.Modes
             // City is conditional and should not reserve a blank row before data arrives.
             int lines = 8;
             if (CityContext.HasData) lines++;
-            if (snapshot.GfxUsedMB > 0 || snapshot.AudioUsedMB > 0) lines++;
-            if (HasItems(snapshot.TopMods)) lines += 1 + snapshot.TopMods.Length;
-            if (HasItems(snapshot.TopVanillaSystems)) lines += 1 + snapshot.TopVanillaSystems.Length;
-            if (HasItems(snapshot.TopModSystems)) lines += 1 + snapshot.TopModSystems.Length;
-            int replaced = snapshot.ReplacedVanillaSystems?.Length ?? 0;
+            if (snapshot.GfxUsedAvailable || snapshot.AudioUsedAvailable) lines++;
+            if (HasItems(snapshot.TopMods)) lines += 1 + snapshot.TopMods.Count;
+            if (HasItems(snapshot.TopVanillaSystems)) lines += 1 + snapshot.TopVanillaSystems.Count;
+            if (HasItems(snapshot.TopModSystems)) lines += 1 + snapshot.TopModSystems.Count;
+            int replaced = snapshot.ReplacedVanillaSystems?.Count ?? 0;
             if (replaced > 0)
             {
                 int shown = replaced > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : replaced;
@@ -68,9 +69,9 @@ namespace VanillaProfiler.Overlay.Modes
                 $"Memory used:   {snapshot.ManagedMB,5:F0} MB managed   ({OverlayFormat.Delta(snapshot.ManagedDeltaMB)} since start)",
                 ctx.Theme.BodyStyle);
 
-            if (snapshot.GfxUsedMB > 0 || snapshot.AudioUsedMB > 0)
+            if (snapshot.GfxUsedAvailable || snapshot.AudioUsedAvailable)
                 OverlayPanel.DrawLine(ctx,
-                    $"GPU memory:    {snapshot.GfxUsedMB,5:F0} MB Gfx,  {snapshot.AudioUsedMB,4:F0} MB audio",
+                    $"GPU memory:    {OverlayFormat.MemoryMB(snapshot.GfxUsedMB, snapshot.GfxUsedAvailable),8} Gfx,  {OverlayFormat.MemoryMB(snapshot.AudioUsedMB, snapshot.AudioUsedAvailable),8} audio",
                     ctx.Theme.DimStyle);
 
             // Per-thread Main/Render/GPU/PresentWait breakdown lives in EngineMode —
@@ -87,22 +88,23 @@ namespace VanillaProfiler.Overlay.Modes
                     $"City:          {OverlayFormat.Count(CityContext.Citizens)} pop, {OverlayFormat.Count(CityContext.Vehicles)} vehicles, {OverlayFormat.Count(CityContext.Buildings)} buildings",
                     ctx.Theme.DimStyle);
 
-            DrawTopList(ctx, "Top mods (main-thread ms in sample)", snapshot.TopMods);
-            DrawTopList(ctx, "Top vanilla systems (main-thread cost)", snapshot.TopVanillaSystems);
-            DrawTopList(ctx, "Top mod systems (main-thread cost)", snapshot.TopModSystems);
+            OverlayPanel.DrawTopTable(ctx, "Top mods (main-thread ms in sample)", snapshot.TopMods);
+            OverlayPanel.DrawTopTable(ctx, "Top vanilla systems (main-thread cost)", snapshot.TopVanillaSystems);
+            OverlayPanel.DrawTopTable(ctx, "Top mod systems (main-thread cost)", snapshot.TopModSystems);
             DrawReplacements(ctx, snapshot.ReplacedVanillaSystems);
         }
 
-        private static void DrawReplacements(DrawContext ctx, (string VanillaSystem, string OwnerMod, double TotalMs)[] items)
+        private static void DrawReplacements(
+            DrawContext ctx, IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> items)
         {
-            if (items == null || items.Length == 0) return;
+            if (items == null || items.Count == 0) return;
             // The ms is honest total Update elapsed time. We can't split it
             // between the patching mod's prefix and the (possibly skipped)
             // vanilla original — Harmony does not expose a hook between
             // them. Header reflects that: cost is shown, attribution split
             // is what's not measurable.
             OverlayPanel.DrawSection(ctx, "Patched vanilla systems (total Update ms, mod+vanilla split unknown)");
-            int shown = items.Length > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : items.Length;
+            int shown = items.Count > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : items.Count;
             for (int i = 0; i < shown; i++)
             {
                 var item = items[i];
@@ -111,20 +113,12 @@ namespace VanillaProfiler.Overlay.Modes
                     $"  {sys,-38}  {item.TotalMs,6:F1} ms  ← {item.OwnerMod}",
                     ctx.Theme.BodyStyle);
             }
-            if (items.Length > shown)
+            if (items.Count > shown)
                 OverlayPanel.DrawLine(ctx,
-                    $"  +{items.Length - shown} more — see VanillaProfiler.log",
+                    $"  +{items.Count - shown} more — see VanillaProfiler.log",
                     ctx.Theme.DimStyle);
         }
 
-        private static void DrawTopList(DrawContext ctx, string title, (string Name, double TotalMs)[] items)
-        {
-            if (!HasItems(items)) return;
-            OverlayPanel.DrawSection(ctx, title);
-            foreach (var (name, ms) in items)
-                OverlayPanel.DrawLine(ctx, $"  {OverlayFormat.Truncate(name, 36),-36}  {ms,7:F1} ms", ctx.Theme.BodyStyle);
-        }
-
-        private static bool HasItems((string, double)[] arr) => arr != null && arr.Length > 0;
+        private static bool HasItems(IReadOnlyCollection<(string, double)> rows) => rows != null && rows.Count > 0;
     }
 }

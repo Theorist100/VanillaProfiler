@@ -40,11 +40,7 @@ namespace VanillaProfiler
             [HarmonyPostfix]
             public static void Postfix(long __state)
             {
-                try
-                {
-                    ProfilerHost.TryGet()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - __state);
-                }
-                catch { /* profiler — never crash game */ }
+                Complete(__state);
             }
         }
 
@@ -73,12 +69,17 @@ namespace VanillaProfiler
             [HarmonyPostfix]
             public static void Postfix(long __state)
             {
-                try
-                {
-                    ProfilerHost.TryGet()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - __state);
-                }
-                catch { /* profiler — never crash game */ }
+                Complete(__state);
             }
+        }
+
+        private static void Complete(long startTicks)
+        {
+            try
+            {
+                ProfilerHost.TryGetHotPath()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - startTicks);
+            }
+            catch { /* profiler — never crash game */ }
         }
     }
 }

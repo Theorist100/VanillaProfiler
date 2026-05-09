@@ -32,7 +32,7 @@ namespace VanillaProfiler.Overlay
         private const float SAVE_DEBOUNCE_S = 0.5f;
         private const float MIN_VISIBLE_PX = 100f;
 
-        public event EventHandler OnApplied;
+        public event EventHandler? OnApplied;
 
         // Last label matches HiddenMode.DisplayName ("Hide") so the segmented row
         // shows the same word as the bottom-row mode tabs. "Hidden" used to clip
@@ -42,11 +42,11 @@ namespace VanillaProfiler.Overlay
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
 
-        private ProfilerSettings m_Draft;
-        private string m_IntervalText;
-        private string m_SparklineWidthText;
-        private string m_SpikeThresholdText;
-        private string m_ErrorText;
+        private ProfilerSettings? m_Draft;
+        private string m_IntervalText = string.Empty;
+        private string m_SparklineWidthText = string.Empty;
+        private string m_SpikeThresholdText = string.Empty;
+        private string? m_ErrorText;
         private bool m_DirtyReportInterval;
         private bool m_DirtyDefaultMode;
         private bool m_DirtyAnchor;
@@ -66,7 +66,7 @@ namespace VanillaProfiler.Overlay
 
         // Cached theme reference for the GUI.Window callback (Unity invokes it without
         // arguments other than windowID, so the panel state has to live on the instance).
-        private OverlayTheme m_ActiveTheme;
+        private OverlayTheme m_ActiveTheme = null!;
 
         public bool IsOpen => m_Draft != null;
 
@@ -186,59 +186,10 @@ namespace VanillaProfiler.Overlay
             GUI.DrawTexture(new Rect(lx, ly + 2f, fw - 6f, 1f), theme.BorderTexture);
             ly += 8f;
 
-            ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Report interval (s)",
-                ref m_IntervalText, () => { m_DirtyReportInterval = true; m_ErrorText = null; }, "1-60");
-
-            ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Sparkline width",
-                ref m_SparklineWidthText, () => { m_DirtySparklineWidth = true; m_ErrorText = null; }, "10-60");
-
-            // Default GUI.skin.toggle renders the checkbox glyph; passing BodyStyle
-            // here previously stripped the checkbox and left only the label.
-            bool newSpike = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                m_Draft.SpikeScreenshots, " Spike screenshots (also Ctrl+F7 toggle)", theme.ToggleStyle);
-            if (newSpike != m_Draft.SpikeScreenshots)
-            {
-                m_Draft.SpikeScreenshots = newSpike;
-                m_DirtySpikeScreenshots = true;
-            }
-            ly += OverlayPanel.LINE_H + 4f;
-
-            bool newProfileVanilla = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                m_Draft.ProfileVanillaSystems, " Profile vanilla systems", theme.ToggleStyle);
-            if (newProfileVanilla != m_Draft.ProfileVanillaSystems)
-            {
-                m_Draft.ProfileVanillaSystems = newProfileVanilla;
-                m_DirtyProfileVanilla = true;
-            }
-            ly += OverlayPanel.LINE_H + 2f;
-
-            GUI.Label(
-                new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                "    Slows the game — only enable while investigating a vanilla system.",
-                theme.HintStyle);
-            ly += OverlayPanel.LINE_H + 4f;
-
-            bool newHideHint = GUI.Toggle(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                m_Draft.HideHintBadge, " Show hint pill in Hide mode", theme.ToggleStyle);
-            if (newHideHint != m_Draft.HideHintBadge)
-            {
-                m_Draft.HideHintBadge = newHideHint;
-                m_DirtyHideHintBadge = true;
-            }
-            ly += OverlayPanel.LINE_H + 4f;
-
-            ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Spike threshold (ms)",
-                ref m_SpikeThresholdText, () => { m_DirtySpikeThreshold = true; m_ErrorText = null; }, "33-1000");
-
-            ly = DrawSegmentedRow(theme, lx, ly, fw, "Default mode",
-                m_Draft.DefaultMode, s_ModeLabels,
-                v => { m_Draft.DefaultMode = v; m_DirtyDefaultMode = true; });
-
-            ly = DrawSegmentedRow(theme, lx, ly, fw, "Position",
-                m_Draft.Anchor, s_AnchorLabels,
-                v => { m_Draft.Anchor = v; m_DirtyAnchor = true; });
-
-            ly = DrawScaleRow(theme, lx, ly, fw);
+            ly = DrawTextSettings(theme, lx, ly);
+            ly = DrawToggleSettings(theme, lx, ly, fw);
+            ly = DrawSpikeThreshold(theme, lx, ly);
+            ly = DrawModeSettings(theme, lx, ly, fw);
             ly += 4f;
 
             ly = DrawActionButtons(lx, ly);
@@ -249,18 +200,7 @@ namespace VanillaProfiler.Overlay
                 ly += OverlayPanel.LINE_H;
             }
 
-            // Tell the player where the *real* output lives — overlay numbers are a
-            // glance view; the log and the Ctrl+F11 export are what should be sent in
-            // bug reports. Paths are written relative to persistentDataPath so the
-            // hint stays readable across users without leaking absolute home dirs.
-            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                "Settings: VanillaProfiler/settings.json", theme.HintStyle);
-            ly += OverlayPanel.LINE_H;
-            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                "Live log: Logs/VanillaProfiler.log", theme.HintStyle);
-            ly += OverlayPanel.LINE_H;
-            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
-                "Reports (Ctrl+F11): Reports/CSII_Report_*.txt", theme.HintStyle);
+            DrawOutputHints(theme, lx, ly, fw);
 
             // Drag handle = title band only — the rest of the window has interactive
             // text fields and buttons that must receive clicks.
@@ -271,6 +211,64 @@ namespace VanillaProfiler.Overlay
             GUI.DragWindow(dragHandle);
         }
 
+        private float DrawTextSettings(OverlayTheme theme, float lx, float ly)
+        {
+            ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Report interval (s)",
+                ref m_IntervalText, () => { m_DirtyReportInterval = true; m_ErrorText = null; }, "1-60");
+            return SettingsWidgets.DrawTextField(theme, lx, ly, "Sparkline width",
+                ref m_SparklineWidthText, () => { m_DirtySparklineWidth = true; m_ErrorText = null; }, "10-60");
+        }
+
+        private float DrawSpikeThreshold(OverlayTheme theme, float lx, float ly)
+        {
+            return SettingsWidgets.DrawTextField(theme, lx, ly, "Spike threshold (ms)",
+                ref m_SpikeThresholdText, () => { m_DirtySpikeThreshold = true; m_ErrorText = null; }, "33-1000");
+        }
+
+        private float DrawToggleSettings(OverlayTheme theme, float lx, float ly, float fw)
+        {
+            ly = SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft!.SpikeScreenshots,
+                " Spike screenshots (also Ctrl+F7 toggle)",
+                v => { m_Draft.SpikeScreenshots = v; m_DirtySpikeScreenshots = true; });
+
+            ly = SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft.ProfileVanillaSystems,
+                " Profile vanilla systems",
+                v => { m_Draft.ProfileVanillaSystems = v; m_DirtyProfileVanilla = true; },
+                bottomGap: 2f);
+
+            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                "    Slows the game — only enable while investigating a vanilla system.",
+                theme.HintStyle);
+            ly += OverlayPanel.LINE_H + 4f;
+
+            return SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft.HideHintBadge,
+                " Show hint pill in Hide mode",
+                v => { m_Draft.HideHintBadge = v; m_DirtyHideHintBadge = true; });
+        }
+
+        private float DrawModeSettings(OverlayTheme theme, float lx, float ly, float fw)
+        {
+            ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Default mode",
+                m_Draft!.DefaultMode, s_ModeLabels,
+                v => { m_Draft.DefaultMode = v; m_DirtyDefaultMode = true; });
+            ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Position",
+                m_Draft.Anchor, s_AnchorLabels,
+                v => { m_Draft.Anchor = v; m_DirtyAnchor = true; });
+            return DrawScaleRow(theme, lx, ly, fw);
+        }
+
+        private static void DrawOutputHints(OverlayTheme theme, float lx, float ly, float fw)
+        {
+            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                "Settings: VanillaProfiler/settings.json", theme.HintStyle);
+            ly += OverlayPanel.LINE_H;
+            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                "Live log: Logs/VanillaProfiler.log", theme.HintStyle);
+            ly += OverlayPanel.LINE_H;
+            GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
+                "Reports (Ctrl+F11): Reports/CSII_Report_*.txt", theme.HintStyle);
+        }
+
         private float MeasureHeight()
         {
             float height = BASE_H;
@@ -279,23 +277,6 @@ namespace VanillaProfiler.Overlay
             if (!string.IsNullOrEmpty(m_ErrorText))
                 height += OverlayPanel.LINE_H;
             return height;
-        }
-
-        private static float DrawSegmentedRow(OverlayTheme theme, float lx, float ly, float fw,
-            string label, int current, string[] labels, Action<int> onChanged)
-        {
-            // Tighter label gutter than DrawTextField (110 vs 160). Segment row
-            // labels ("Default mode", "Position", "UI scale") are shorter than
-            // text-field labels ("Report interval (s)") so they fit in 110 px,
-            // which gives the segmented buttons more room to render long names.
-            GUI.Label(new Rect(lx, ly, 110f, OverlayPanel.LINE_H), label, theme.BodyStyle);
-            int next = SettingsWidgets.DrawSegmented(
-                theme,
-                new Rect(lx + 120f, ly, fw - 120f, OverlayPanel.LINE_H),
-                current,
-                labels);
-            if (next != current) onChanged(next);
-            return ly + OverlayPanel.LINE_H + 4f;
         }
 
         private float DrawActionButtons(float lx, float ly)
@@ -327,27 +308,18 @@ namespace VanillaProfiler.Overlay
 
         private float DrawScaleRow(OverlayTheme theme, float lx, float ly, float fw)
         {
-            // Match DrawSegmentedRow's 110/120 gutter so all three segmented
-            // rows (Default mode / Position / UI scale) start at the same x.
-            GUI.Label(new Rect(lx, ly, 110f, OverlayPanel.LINE_H), "UI scale", theme.BodyStyle);
-            int current = ScaleIndex(m_Draft.UiScale);
-            int next = SettingsWidgets.DrawSegmented(
-                theme,
-                new Rect(lx + 120f, ly, fw - 120f, OverlayPanel.LINE_H),
-                current,
-                s_ScaleLabels);
-            if (next >= 0 && next != current)
-            {
-                m_Draft.UiScale = s_ScaleValues[next];
-                m_DirtyUiScale = true;
-            }
+            float rowY = ly;
+            int current = ScaleIndex(m_Draft!.UiScale);
+            ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "UI scale",
+                current, s_ScaleLabels,
+                v => { m_Draft.UiScale = s_ScaleValues[v]; m_DirtyUiScale = true; });
             if (current < 0)
             {
-                GUI.Label(new Rect(lx + 120f, ly + OverlayPanel.LINE_H, fw - 120f, OverlayPanel.LINE_H),
+                GUI.Label(new Rect(lx + 120f, rowY + OverlayPanel.LINE_H, fw - 120f, OverlayPanel.LINE_H),
                     $"Custom scale: {m_Draft.UiScale:0.##}x", theme.HintStyle);
-                return ly + OverlayPanel.LINE_H * 2f + 4f;
+                return rowY + OverlayPanel.LINE_H * 2f + 4f;
             }
-            return ly + OverlayPanel.LINE_H + 4f;
+            return ly;
         }
 
         private void OpenWithCurrent()
@@ -371,7 +343,7 @@ namespace VanillaProfiler.Overlay
             if (!ValidateDraftFromText())
                 return;
 
-            m_Draft.Clamp();
+            m_Draft!.Clamp();
             var merged = SettingsDraft.Clone(SettingsStore.Current);
             if (m_DirtyReportInterval) merged.ReportIntervalSec = m_Draft.ReportIntervalSec;
             if (m_DirtyDefaultMode) merged.DefaultMode = m_Draft.DefaultMode;
@@ -400,31 +372,33 @@ namespace VanillaProfiler.Overlay
         private bool ValidateDraftFromText()
         {
             m_ErrorText = null;
+            var draft = m_Draft;
+            if (draft == null) return false;
 
             if (m_DirtyReportInterval)
             {
                 if (!V.TryFloatInRange(m_IntervalText, 1f, 60f, "Report interval", out var v, out m_ErrorText))
                     return false;
-                m_Draft.ReportIntervalSec = v;
+                draft.ReportIntervalSec = v;
             }
             if (m_DirtySparklineWidth)
             {
                 if (!V.TryIntInRange(m_SparklineWidthText, 10, 60, "Sparkline width", out var v, out m_ErrorText))
                     return false;
-                m_Draft.SparklineWidth = v;
+                draft.SparklineWidth = v;
             }
             if (m_DirtySpikeThreshold)
             {
                 if (!V.TryFloatInRange(m_SpikeThresholdText, 33f, 1000f, "Spike threshold", out var v, out m_ErrorText))
                     return false;
-                m_Draft.SpikeThresholdMs = v;
+                draft.SpikeThresholdMs = v;
             }
             return true;
         }
 
         private void SyncTextFieldsFromDraft()
         {
-            m_IntervalText = m_Draft.ReportIntervalSec.ToString("F1", CultureInfo.InvariantCulture);
+            m_IntervalText = m_Draft!.ReportIntervalSec.ToString("F1", CultureInfo.InvariantCulture);
             m_SparklineWidthText = m_Draft.SparklineWidth.ToString();
             m_SpikeThresholdText = m_Draft.SpikeThresholdMs.ToString("F0", CultureInfo.InvariantCulture);
         }

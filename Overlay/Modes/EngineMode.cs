@@ -49,40 +49,37 @@ namespace VanillaProfiler.Overlay.Modes
             // player sees which stage of the pipeline is gating the frame. PresentWait is
             // the headline GPU-bound signal: high here means CPU is idle waiting on GPU.
             OverlayPanel.DrawSection(ctx, "Frame timing");
+            OverlayPanel.DrawCounterRow(ctx, "  CPU main:", snapshot.MainThreadCpuMs,
+                snapshot.MainThreadCpuAvailable, "ms", ctx.Theme.BodyStyle);
+            OverlayPanel.DrawCounterRow(ctx, "  CPU render:", snapshot.RenderThreadCpuMs,
+                snapshot.RenderThreadCpuAvailable, "ms", ctx.Theme.BodyStyle);
+            OverlayPanel.DrawCounterRow(ctx, "  GPU:", snapshot.GpuFrameTimeMs,
+                snapshot.GpuFrameTimeAvailable, "ms", ctx.Theme.BodyStyle);
             OverlayPanel.DrawLine(ctx,
-                $"  CPU main:      {snapshot.MainThreadCpuMs,6:F2} ms",
-                ctx.Theme.BodyStyle);
-            OverlayPanel.DrawLine(ctx,
-                $"  CPU render:    {snapshot.RenderThreadCpuMs,6:F2} ms",
-                ctx.Theme.BodyStyle);
-            OverlayPanel.DrawLine(ctx,
-                $"  GPU:           {snapshot.GpuFrameTimeMs,6:F2} ms",
-                ctx.Theme.BodyStyle);
-            OverlayPanel.DrawLine(ctx,
-                $"  Present wait:  {snapshot.PresentWaitMs,6:F2} ms{PresentWaitHint(snapshot)}",
+                $"  Present wait:  {OverlayFormat.Counter(snapshot.PresentWaitMs, snapshot.PresentWaitAvailable, "ms"),9}{PresentWaitHint(snapshot)}",
                 snapshot.PresentWaitMs > snapshot.AvgFrameMs * 0.5
                     ? ctx.Theme.StyleForHealth(HealthLevel.Poor)
                     : ctx.Theme.DimStyle);
 
             OverlayPanel.DrawSection(ctx, "Render counts");
             OverlayPanel.DrawLine(ctx,
-                $"  DrawCalls {snapshot.DrawCalls,6}   SetPass {snapshot.SetPassCalls,4}",
+                $"  DrawCalls {OverlayFormat.Counter(snapshot.DrawCalls, snapshot.DrawCallsAvailable),6}   SetPass {OverlayFormat.Counter(snapshot.SetPassCalls, snapshot.SetPassCallsAvailable),4}",
                 ctx.Theme.BodyStyle);
             OverlayPanel.DrawLine(ctx,
-                $"  Tris {snapshot.Triangles / 1000,7}K   Verts {snapshot.Vertices / 1000,7}K",
+                $"  Tris {OverlayFormat.CounterK(snapshot.Triangles, snapshot.TrianglesAvailable),8}   Verts {OverlayFormat.CounterK(snapshot.Vertices, snapshot.VerticesAvailable),8}",
                 ctx.Theme.BodyStyle);
             OverlayPanel.DrawLine(ctx,
-                $"  Shadow casters: {snapshot.ShadowCasters}",
+                $"  Shadow casters: {OverlayFormat.Counter(snapshot.ShadowCasters, snapshot.ShadowCastersAvailable)}",
                 ctx.Theme.BodyStyle);
 
             if (HasGpuMemory(snapshot))
             {
                 OverlayPanel.DrawSection(ctx, "GPU memory");
                 OverlayPanel.DrawLine(ctx,
-                    $"  Used buffers:  {snapshot.UsedBuffersMB,7:F1} MB  ({snapshot.UsedBuffersCount} bufs)",
+                    $"  Used buffers:  {OverlayFormat.Counter(snapshot.UsedBuffersMB, snapshot.UsedBuffersBytesAvailable, "MB"),10}  ({OverlayFormat.Counter(snapshot.UsedBuffersCount, snapshot.UsedBuffersCountAvailable)} bufs)",
                     ctx.Theme.BodyStyle);
                 OverlayPanel.DrawLine(ctx,
-                    $"  Render targets:{snapshot.RenderTexturesMB,7:F1} MB",
+                    $"  Render targets:{OverlayFormat.Counter(snapshot.RenderTexturesMB, snapshot.RenderTexturesBytesAvailable, "MB"),10}",
                     ctx.Theme.BodyStyle);
             }
 
@@ -105,7 +102,7 @@ namespace VanillaProfiler.Overlay.Modes
         }
 
         private static bool HasGpuMemory(OverlaySnapshot snap)
-            => snap.UsedBuffersMB > 0 || snap.RenderTexturesMB > 0;
+            => snap.UsedBuffersBytesAvailable || snap.RenderTexturesBytesAvailable;
 
         private static string PresentWaitHint(OverlaySnapshot snap)
         {

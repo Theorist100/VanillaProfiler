@@ -13,7 +13,7 @@ namespace VanillaProfiler
     {
         protected override void OnUpdate()
         {
-            try { ProfilerHost.TryGet()?.OnSimTick(); }
+            try { ProfilerHost.TryGetHotPath()?.OnSimTick(); }
             catch { /* profiler — never crash game */ }
         }
     }

@@ -12,8 +12,12 @@ namespace VanillaProfiler.Overlay
         /// <summary>UI scale derived from settings (manual override) or screen height (auto).</summary>
         public static float ResolveScale()
         {
-            var s = SettingsStore.Current;
-            if (s.UiScale > 0f) return Mathf.Clamp(s.UiScale, 0.75f, 3f);
+            return ResolveScale(SettingsStore.Snapshot);
+        }
+
+        public static float ResolveScale(ProfilerSettingsSnapshot settings)
+        {
+            if (settings.Settings.UiScale > 0f) return Mathf.Clamp(settings.Settings.UiScale, 0.75f, 3f);
             // Auto: 1080p = 1x, 1440p ≈ 1.33x, 4K = 2x. Let smaller displays
             // shrink to the same lower bound as manual scale so panels still fit.
             return Mathf.Clamp(Screen.height / 1080f, 0.75f, 3f);

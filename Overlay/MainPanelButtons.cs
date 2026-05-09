@@ -18,9 +18,9 @@ namespace VanillaProfiler.Overlay
 
         public sealed class Actions
         {
-            public Action OpenSettings;
-            public Action ExportReport;
-            public Action CycleAnchor;
+            public Action? OpenSettings;
+            public Action? ExportReport;
+            public Action? CycleAnchor;
         }
 
         private readonly OverlayTheme m_Theme;

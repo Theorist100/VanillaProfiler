@@ -8,7 +8,7 @@ namespace VanillaProfiler.Aggregation
     /// </summary>
     public sealed class MetricsLease : IDisposable
     {
-        private MetricsAggregator m_Owner;
+        private MetricsAggregator? m_Owner;
 
         internal MetricsLease(MetricsAggregator owner, MetricsSample sample)
         {
@@ -22,7 +22,6 @@ namespace VanillaProfiler.Aggregation
         {
             if (m_Owner == null) return;
             m_Owner.Recycle(Sample);
-            Sample = null;
             m_Owner = null;
         }
     }

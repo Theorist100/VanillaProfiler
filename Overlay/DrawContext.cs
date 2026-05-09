@@ -15,9 +15,9 @@ namespace VanillaProfiler.Overlay
         // breadcrumb so the player knows Ctrl+F9 leads somewhere meaningful.
         public int ModeIndex { get; set; }
         public int ModeCount { get; set; }
-        public string NextModeName { get; set; }
+        public string NextModeName { get; set; } = string.Empty;
         public int SparklineWidth { get; set; }
-        public string FpsSparkline { get; set; }
+        public string FpsSparkline { get; set; } = string.Empty;
 
         public DrawContext(OverlayTheme theme, float x, float y, float width)
         {

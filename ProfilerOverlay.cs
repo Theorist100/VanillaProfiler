@@ -27,13 +27,12 @@ namespace VanillaProfiler
         private readonly Toast m_Toast = new();
         private readonly SettingsPanel m_Settings = new();
         private readonly OverlayInputHandler m_Input = new();
+        private readonly OverlayState m_State = new();
 
-        private IOverlayMode[] m_Modes;
-        private MainPanelButtons m_Buttons;
-        private int m_ModeIndex;
-        private Anchor m_Anchor = Anchor.TopLeft;
+        private IOverlayMode[] m_Modes = Array.Empty<IOverlayMode>();
+        private MainPanelButtons m_Buttons = null!;
 
-        private PanelPositionController m_PanelPosition;
+        private PanelPositionController m_PanelPosition = null!;
         private bool m_SettingsSaveDirty;
         private float m_SettingsSaveDirtyAt;
 
@@ -88,8 +87,7 @@ namespace VanillaProfiler
         private void ApplyStartupSettings()
         {
             var s = SettingsStore.Current;
-            m_ModeIndex = Mathf.Clamp(s.DefaultMode, 0, m_Modes.Length - 1);
-            m_Anchor = (Anchor)Mathf.Clamp(s.Anchor, 0, 3);
+            m_State.ApplyStartup(s.DefaultMode, s.Anchor, m_Modes.Length);
             m_PanelPosition.Load();
         }
 
@@ -97,13 +95,13 @@ namespace VanillaProfiler
         {
             var s = SettingsStore.Current;
             var nextAnchor = (Anchor)Mathf.Clamp(s.Anchor, 0, 3);
-            if (nextAnchor != m_Anchor)
+            if (nextAnchor != m_State.Anchor)
             {
                 // Choosing an anchor is an explicit snap request. If the panel had a
                 // manual drag position, discard it so the anchor can take effect.
                 m_PanelPosition.SnapToAnchor();
             }
-            m_Anchor = nextAnchor;
+            m_State.SetAnchor(nextAnchor);
         }
 
         private void Update()
@@ -128,12 +126,13 @@ namespace VanillaProfiler
         {
             m_Theme.EnsureInitialized();
 
-            float scale = PanelLayout.ResolveScale();
+            var settings = SettingsStore.Snapshot;
+            float scale = PanelLayout.ResolveScale(settings);
             var savedMatrix = GUI.matrix;
             GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
             try
             {
-                DrawScaled(scale);
+                DrawScaled(scale, settings);
             }
             finally
             {
@@ -141,12 +140,12 @@ namespace VanillaProfiler
             }
         }
 
-        private void DrawScaled(float scale)
+        private void DrawScaled(float scale, ProfilerSettingsSnapshot settings)
         {
             var profiler = ProfilerHost.TryGet();
             var snapshot = profiler?.LastSnapshot;
             var health = profiler?.LastHealth;
-            var mode = m_Modes[m_ModeIndex];
+            var mode = m_Modes[m_State.ModeIndex];
             var lifecycle = profiler?.LifecycleState ?? ProfilerLifecycleState.Initializing;
 
             // Render order = Z-order (last drawn = topmost):
@@ -170,18 +169,22 @@ namespace VanillaProfiler
                 // True-hide opt-out: a player who knows the Ctrl+F9 hotkey can disable
                 // the hint pill so it stops overlapping top-right HUD buttons. Default
                 // is on so a first-time hider doesn't lose the way back.
-                if (SettingsStore.Current.HideHintBadge)
+                if (settings.Settings.HideHintBadge)
                     OverlayBadges.DrawHidden(m_Theme, scale);
             }
             else if (lifecycle == ProfilerLifecycleState.Active)
-                DrawMainPanel(profiler, mode, snapshot, health, scale);
+            {
+                if (profiler != null && snapshot != null && health != null)
+                    DrawMainPanel(profiler, mode, snapshot, health, scale, settings);
+            }
             // else: Initializing / LoadingCity / NoCity → nothing drawn
 
             m_Settings.Draw(m_Theme, scale);
             m_Toast.Draw(m_Theme, scale);
         }
 
-        private void DrawMainPanel(Profiler profiler, IOverlayMode mode, OverlaySnapshot snapshot, HealthReport health, float scale)
+        private void DrawMainPanel(Profiler profiler, IOverlayMode mode, OverlaySnapshot snapshot,
+            HealthReport health, float scale, ProfilerSettingsSnapshot settings)
         {
             float contentHeight = mode.MeasureHeight(snapshot);
             if (contentHeight <= 0) return;
@@ -189,18 +192,19 @@ namespace VanillaProfiler
 
             // Layout: position from drag (manual) or from anchor preset; height
             // always recomputed from the active mode.
-            m_PanelPosition.ApplyLayout(m_Anchor, WIDTH, totalHeight, scale);
+            m_PanelPosition.ApplyLayout(m_State.Anchor, WIDTH, totalHeight, scale);
             var rect = m_PanelPosition.Rect;
             var before = new Vector2(rect.x, rect.y);
 
             m_PanelPosition.BeginWindow();
             rect = GUI.Window(MAIN_WINDOW_ID, rect,
-                id => DrawMainWindowContents(profiler, snapshot, health, mode),
+                id => DrawMainWindowContents(profiler, snapshot, health, mode, settings),
                 GUIContent.none, GUIStyle.none);
             m_PanelPosition.CompleteWindow(rect, before, scale);
         }
 
-        private void DrawMainWindowContents(Profiler profiler, OverlaySnapshot snapshot, HealthReport health, IOverlayMode mode)
+        private void DrawMainWindowContents(Profiler profiler, OverlaySnapshot snapshot, HealthReport health,
+            IOverlayMode mode, ProfilerSettingsSnapshot settings)
         {
             var panelRect = m_PanelPosition.Rect;
             var rect = new Rect(0f, 0f, panelRect.width, panelRect.height);
@@ -212,11 +216,11 @@ namespace VanillaProfiler
                 OverlayPanel.PAD,
                 rect.width - OverlayPanel.PAD * 2)
             {
-                ModeIndex = m_ModeIndex,
+                ModeIndex = m_State.ModeIndex,
                 ModeCount = m_Modes.Length,
-                NextModeName = m_Modes[(m_ModeIndex + 1) % m_Modes.Length].DisplayName,
-                SparklineWidth = SettingsStore.Current.SparklineWidth,
-                FpsSparkline = profiler?.FpsSparkline.Render(SettingsStore.Current.SparklineWidth) ?? string.Empty,
+                NextModeName = m_Modes[(m_State.ModeIndex + 1) % m_Modes.Length].DisplayName,
+                SparklineWidth = settings.Settings.SparklineWidth,
+                FpsSparkline = profiler.FpsSparkline.Render(settings.Settings.SparklineWidth),
             };
 
             // Contract: this method is only reached when LifecycleState == Active,
@@ -224,7 +228,7 @@ namespace VanillaProfiler
             // pre-snapshot phase.
             mode.Draw(ctx, snapshot, health);
 
-            SetModeIndex(m_Buttons.Draw(rect, m_ModeIndex, m_Anchor));
+            SetModeIndex(m_Buttons.Draw(rect, m_State.ModeIndex, m_State.Anchor));
 
             // Drag handle = the top header band only. Buttons and text fields below
             // must still receive their own click events.
@@ -236,21 +240,21 @@ namespace VanillaProfiler
         // Action methods — invoked by hotkeys (OverlayInputHandler events) and
         // on-panel buttons. Single source of truth for each command.
 
-        private void DoCycleMode() => SetModeIndex((m_ModeIndex + 1) % m_Modes.Length);
+        private void DoCycleMode() => SetModeIndex((m_State.ModeIndex + 1) % m_Modes.Length);
 
         private void SetModeIndex(int index)
         {
-            index = Mathf.Clamp(index, 0, m_Modes.Length - 1);
-            if (index == m_ModeIndex) return;
-            m_ModeIndex = index;
-            if (m_Modes[m_ModeIndex] is RecommendationsMode)
+            int previousMode = m_State.ModeIndex;
+            m_State.SetMode(index, m_Modes.Length);
+            if (m_State.ModeIndex == previousMode) return;
+            if (m_Modes[m_State.ModeIndex] is RecommendationsMode)
                 GraphicsSettingsProbe.Invalidate();
             // Hide-mode safety net: when the hint pill is disabled the screen
             // goes fully blank, leaving no visible cue how to come back. The
             // toast lasts ~3s, then the screen is truly clean as Emilithe asked.
             // We skip it when the pill is on — the pill already advertises the
             // hotkey, and a flashing toast on top of it is just noise.
-            if (m_Modes[m_ModeIndex] is HiddenMode && !SettingsStore.Current.HideHintBadge)
+            if (m_Modes[m_State.ModeIndex] is HiddenMode && !SettingsStore.Current.HideHintBadge)
                 m_Toast.Show("Profiler hidden — Ctrl+F9 to cycle, Ctrl+F8 settings");
         }
 
@@ -261,7 +265,7 @@ namespace VanillaProfiler
         private void DoExportReport()
         {
             ProfilerHost.TryGet()?.ForceReport();
-            string saved = ReportExporter.Export();
+            string? saved = ReportExporter.Export();
             m_Toast.Show(saved != null
                 ? $"Support file created: {Path.GetFileName(saved)}"
                 : "Support file export failed");
@@ -269,9 +273,9 @@ namespace VanillaProfiler
 
         private void DoCycleAnchor()
         {
-            m_Anchor = m_Anchor.Cycle();
-            SettingsStore.Current.Anchor = (int)m_Anchor;
-            m_Settings.SyncAnchorFromHotkey((int)m_Anchor);
+            m_State.SetAnchor(m_State.Anchor.Cycle());
+            SettingsStore.Current.Anchor = (int)m_State.Anchor;
+            m_Settings.SyncAnchorFromHotkey((int)m_State.Anchor);
             // Cycling anchor explicitly snaps the panel to a corner — discard
             // any prior manual drag so the next layout uses the preset.
             m_PanelPosition.SnapToAnchor();

@@ -28,27 +28,26 @@ namespace VanillaProfiler.Overlay.Modes
             // shown as overlay badges instead of empty mode panels.
             OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  STATUS");
 
-            OverlayPanel.DrawLine(ctx,
-                $"Status: {Label(health.Overall)}",
+            OverlayPanel.DrawMetricRow(ctx, "Status:", Label(health.Overall),
                 ctx.Theme.StyleForHealth(health.Overall));
-            OverlayPanel.DrawLine(ctx, $"Cause:  {Cause(health)}", ctx.Theme.BodyStyle);
-            OverlayPanel.DrawLine(ctx, $"FPS:    {snapshot.AvgFps:F0} avg / {snapshot.MinFps:F0} min", ctx.Theme.BodyStyle);
-            OverlayPanel.DrawLine(ctx, $"Memory: {MemoryText(health)}",
+            OverlayPanel.DrawMetricRow(ctx, "Cause:", Cause(health), ctx.Theme.BodyStyle);
+            OverlayPanel.DrawMetricRow(ctx, "FPS:", $"{snapshot.AvgFps:F0} avg / {snapshot.MinFps:F0} min", ctx.Theme.BodyStyle);
+            OverlayPanel.DrawMetricRow(ctx, "Memory:", MemoryText(health),
                 ctx.Theme.StyleForHealth(MemoryWorst(health)));
 
             // Always-on profiler self-cost so players can see the mod isn't the
             // bottleneck before assuming it is. Labeled "/frame" so it's not
             // confused with the total-over-window numbers in the Details screen.
-            OverlayPanel.DrawLine(ctx,
-                $"Profiler self: {snapshot.ProfilerSelfMs:F2} ms/frame ({snapshot.ProfilerSelfPercent:F2}% of frame)",
+            OverlayPanel.DrawMetricRow(ctx,
+                "Profiler self:", $"{snapshot.ProfilerSelfMs:F2} ms/frame ({snapshot.ProfilerSelfPercent:F2}% of frame)",
                 ctx.Theme.DimStyle);
 
             // Only show the "Likely mod:" line when a mod actually stands out. The
             // previous "Likely mod: no mod stands out yet" reads as a contradiction
             // (the label promises a suspect, the text retracts it) — better to omit.
-            string mod = TopMod(snapshot);
+            string? mod = TopMod(snapshot);
             if (!string.IsNullOrEmpty(mod))
-                OverlayPanel.DrawLine(ctx, $"Likely mod: {OverlayFormat.Truncate(mod, 46)}", ctx.Theme.BodyStyle);
+                OverlayPanel.DrawMetricRow(ctx, "Likely mod:", OverlayFormat.Truncate(mod, 46), ctx.Theme.BodyStyle);
         }
 
         private static string Label(HealthLevel level)
@@ -76,11 +75,11 @@ namespace VanillaProfiler.Overlay.Modes
                 BottleneckKind.RenderBound => "graphics/rendering",
                 BottleneckKind.SimBound => "simulation",
                 BottleneckKind.MemoryBound => "managed memory growth",
-                BottleneckKind.Balanced => null,
-                BottleneckKind.Unknown => null,
+                BottleneckKind.Balanced => string.Empty,
+                BottleneckKind.Unknown => string.Empty,
                 _ => throw new ArgumentOutOfRangeException(nameof(health), health.Bottleneck, "Unhandled BottleneckKind"),
             };
-            if (fromBottleneck != null) return fromBottleneck;
+            if (!string.IsNullOrEmpty(fromBottleneck)) return fromBottleneck;
 
             // Overall=Warning with Balanced bottleneck and no Poor signal — describe
             // whichever Ok-level signal lifted the verdict above Good. Without this
@@ -120,9 +119,9 @@ namespace VanillaProfiler.Overlay.Modes
         private static bool IsStable(string hint)
             => string.Equals(hint, "Stable", System.StringComparison.OrdinalIgnoreCase);
 
-        private static string TopMod(OverlaySnapshot snapshot)
+        private static string? TopMod(OverlaySnapshot snapshot)
         {
-            if (snapshot?.TopMods == null || snapshot.TopMods.Length == 0)
+            if (snapshot.TopMods.Count == 0)
                 return null;
 
             var top = snapshot.TopMods[0];

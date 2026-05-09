@@ -7,15 +7,15 @@ namespace VanillaProfiler.Output
     /// <summary>
     /// Atomic file write helper using temp-file + rename pattern.
     /// Prevents data corruption on crash/power loss during write — NTFS guarantees
-    /// atomic rename within same volume. Mirrors the CivicSurvival pattern; required
-    /// by CIVIC009 analyzer expectation that text writes go through this entry point.
+    /// atomic rename within same volume. Required by CIVIC009 analyzer expectation
+    /// that text writes go through this entry point.
     /// </summary>
     public static class AtomicFileWriter
     {
         /// <summary>
         /// Atomically write text to file. Writes to .tmp first, then renames.
         /// </summary>
-        public static void WriteAllText(string path, string content, Encoding encoding = null)
+        public static void WriteAllText(string path, string content, Encoding? encoding = null)
         {
             WriteAllText(path, content, encoding, backupPath: null);
         }
@@ -25,7 +25,7 @@ namespace VanillaProfiler.Output
         /// When backupPath is non-null and the target already exists, File.Replace stores
         /// the previous content there so callers can recover from a corrupted save.
         /// </summary>
-        public static void WriteAllText(string path, string content, Encoding encoding, string backupPath)
+        public static void WriteAllText(string path, string content, Encoding? encoding, string? backupPath)
         {
             string tmp = CreateTempPath(path);
             try
@@ -41,7 +41,7 @@ namespace VanillaProfiler.Output
 
         private static string CreateTempPath(string path) => $"{path}.{Guid.NewGuid():N}.tmp";
 
-        private static void ReplaceWithTemp(string tmpPath, string targetPath, string backupPath = null)
+        private static void ReplaceWithTemp(string tmpPath, string targetPath, string? backupPath = null)
         {
             // File.Replace is atomic swap when target exists; Move otherwise.
             try

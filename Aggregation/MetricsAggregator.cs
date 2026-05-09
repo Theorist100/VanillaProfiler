@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using VanillaProfiler.Diagnostics;
@@ -22,8 +23,8 @@ namespace VanillaProfiler.Aggregation
         // from SettingsStore so the very first report window already honours the
         // user's configured threshold (was hardcoded 0.5f, ignoring SettingsStore for
         // the first ~5 seconds of every session).
-        private long m_SyncPointTickThreshold = ComputeSyncPointTicks(
-            SettingsStore.Current.SyncPointThresholdMs);
+        private readonly Func<ProfilerSettingsSnapshot> m_Settings;
+        private long m_SyncPointTickThreshold;
 
         private Dictionary<string, PhaseData> m_Phases = new();
         private Dictionary<string, PhaseData> m_VanillaSystems = new();
@@ -31,11 +32,17 @@ namespace VanillaProfiler.Aggregation
         private Dictionary<string, PhaseData> m_ModAggregate = new();
         private Dictionary<string, PhaseData> m_PatchedVanillaSystems = new();
 
-        private Dictionary<string, PhaseData> m_SparePhases = new();
-        private Dictionary<string, PhaseData> m_SpareVanillaSystems = new();
-        private Dictionary<string, PhaseData> m_SpareModSystems = new();
-        private Dictionary<string, PhaseData> m_SpareModAggregate = new();
-        private Dictionary<string, PhaseData> m_SparePatchedVanillaSystems = new();
+        private Dictionary<string, PhaseData>? m_SparePhases = new();
+        private Dictionary<string, PhaseData>? m_SpareVanillaSystems = new();
+        private Dictionary<string, PhaseData>? m_SpareModSystems = new();
+        private Dictionary<string, PhaseData>? m_SpareModAggregate = new();
+        private Dictionary<string, PhaseData>? m_SparePatchedVanillaSystems = new();
+
+        public MetricsAggregator(Func<ProfilerSettingsSnapshot> settings)
+        {
+            m_Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            RefreshSettings();
+        }
 
         public void RecordSimTick()
         {
@@ -57,12 +64,12 @@ namespace VanillaProfiler.Aggregation
             Add(m_Phases, name, ticks, m_SyncPointTickThreshold);
         }
 
-        public void RecordSystem(string name, long ticks, bool isVanilla, string modName)
+        public void RecordSystem(string name, long ticks, bool isVanilla, string? modName)
         {
             var dict = isVanilla ? m_VanillaSystems : m_ModSystems;
             Add(dict, name, ticks, m_SyncPointTickThreshold);
             if (!isVanilla && !string.IsNullOrEmpty(modName))
-                Add(m_ModAggregate, modName, ticks, m_SyncPointTickThreshold);
+                Add(m_ModAggregate, modName!, ticks, m_SyncPointTickThreshold);
         }
 
         /// <summary>
@@ -82,7 +89,7 @@ namespace VanillaProfiler.Aggregation
         {
             // Pick up settings changes (e.g. SyncPointThresholdMs) once per window
             // rather than on every hot-path Add call.
-            m_SyncPointTickThreshold = ComputeSyncPointTicks(SettingsStore.Current.SyncPointThresholdMs);
+            RefreshSettings();
 
             long frameTimeSum = m_FrameTimeSum;
             long frameTimeMax = m_FrameTimeMax;
@@ -122,17 +129,16 @@ namespace VanillaProfiler.Aggregation
 
         internal void Recycle(MetricsSample sample)
         {
-            if (sample == null) return;
             StoreSpare(ref m_SparePhases, sample.Phases);
             StoreSpare(ref m_SpareVanillaSystems, sample.VanillaSystems);
             StoreSpare(ref m_SpareModSystems, sample.ModSystems);
             StoreSpare(ref m_SpareModAggregate, sample.ModAggregate);
             StoreSpare(ref m_SparePatchedVanillaSystems, sample.PatchedVanillaSystems);
-            sample.Phases = null;
-            sample.VanillaSystems = null;
-            sample.ModSystems = null;
-            sample.ModAggregate = null;
-            sample.PatchedVanillaSystems = null;
+            sample.Phases = new Dictionary<string, PhaseData>();
+            sample.VanillaSystems = new Dictionary<string, PhaseData>();
+            sample.ModSystems = new Dictionary<string, PhaseData>();
+            sample.ModAggregate = new Dictionary<string, PhaseData>();
+            sample.PatchedVanillaSystems = new Dictionary<string, PhaseData>();
         }
 
         public void Reset()
@@ -170,6 +176,11 @@ namespace VanillaProfiler.Aggregation
             return ticks > 0 ? ticks : 1;
         }
 
+        private void RefreshSettings()
+        {
+            m_SyncPointTickThreshold = ComputeSyncPointTicks(m_Settings().Settings.SyncPointThresholdMs);
+        }
+
         private void ResetCounters()
         {
             m_FrameTimeSum = 0;
@@ -180,7 +191,7 @@ namespace VanillaProfiler.Aggregation
             m_Spikes20 = 0;
         }
 
-        private static Dictionary<string, PhaseData> TakeSpare(ref Dictionary<string, PhaseData> spare)
+        private static Dictionary<string, PhaseData> TakeSpare(ref Dictionary<string, PhaseData>? spare)
         {
             var dict = spare ?? new Dictionary<string, PhaseData>();
             spare = null;
@@ -188,9 +199,9 @@ namespace VanillaProfiler.Aggregation
             return dict;
         }
 
-        private static void StoreSpare(ref Dictionary<string, PhaseData> spare, Dictionary<string, PhaseData> dict)
+        private static void StoreSpare(ref Dictionary<string, PhaseData>? spare, IReadOnlyDictionary<string, PhaseData> sample)
         {
-            if (dict == null || spare != null) return;
+            if (sample is not Dictionary<string, PhaseData> dict || spare != null) return;
             dict.Clear();
             spare = dict;
         }

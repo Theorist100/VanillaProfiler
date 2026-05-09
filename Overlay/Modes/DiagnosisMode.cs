@@ -38,7 +38,7 @@ namespace VanillaProfiler.Overlay.Modes
             // Only render SUSPECTED MOD when a mod actually stands out. Otherwise the
             // header reads as an accusation that the body then retracts ("Suspected
             // mod: nothing suspected" is contradictory) — clearer to omit the section.
-            string mod = TopMod(snapshot);
+            string? mod = TopMod(snapshot);
             if (!string.IsNullOrEmpty(mod))
             {
                 OverlayPanel.DrawSection(ctx, "SUSPECTED MOD");
@@ -144,14 +144,14 @@ namespace VanillaProfiler.Overlay.Modes
         {
             // Top vanilla system spent a meaningful chunk of the report window — the
             // performance hit is on the engine, not on a mod system.
-            if (snapshot?.TopVanillaSystems == null || snapshot.TopVanillaSystems.Length == 0)
+            if (snapshot.TopVanillaSystems.Count == 0)
                 return false;
             return snapshot.TopVanillaSystems[0].TotalMs > 50.0;
         }
 
-        private static string TopMod(OverlaySnapshot snapshot)
+        private static string? TopMod(OverlaySnapshot snapshot)
         {
-            if (snapshot?.TopMods == null || snapshot.TopMods.Length == 0)
+            if (snapshot.TopMods.Count == 0)
                 return null;
 
             var top = snapshot.TopMods[0];

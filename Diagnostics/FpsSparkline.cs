@@ -26,7 +26,7 @@ namespace VanillaProfiler.Diagnostics
 
         // Render cache: sparkline string changes only on Push (≤ 1 Hz), so OnGUI
         // can call Render every frame without allocating.
-        private string m_CachedRender;
+        private string? m_CachedRender;
         private int m_CachedWidth;
         private int m_CachedSampleCount;
 

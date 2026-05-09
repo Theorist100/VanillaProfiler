@@ -16,10 +16,10 @@ namespace VanillaProfiler.Aggregation
         public int SimTickCount;
         public int Spikes30;
         public int Spikes20;
-        public Dictionary<string, PhaseData> Phases;
-        public Dictionary<string, PhaseData> VanillaSystems;
-        public Dictionary<string, PhaseData> ModSystems;
-        public Dictionary<string, PhaseData> ModAggregate;
+        public IReadOnlyDictionary<string, PhaseData> Phases = new Dictionary<string, PhaseData>();
+        public IReadOnlyDictionary<string, PhaseData> VanillaSystems = new Dictionary<string, PhaseData>();
+        public IReadOnlyDictionary<string, PhaseData> ModSystems = new Dictionary<string, PhaseData>();
+        public IReadOnlyDictionary<string, PhaseData> ModAggregate = new Dictionary<string, PhaseData>();
 
         // Vanilla systems whose OnUpdate currently has a foreign Harmony
         // prefix. Populated unconditionally (independent of the
@@ -27,6 +27,6 @@ namespace VanillaProfiler.Aggregation
         // section can show total Update ms — that elapsed time blends the
         // mod's prefix and the vanilla original, but the total is honest.
         // Disjoint from VanillaSystems so totals are not double-counted.
-        public Dictionary<string, PhaseData> PatchedVanillaSystems;
+        public IReadOnlyDictionary<string, PhaseData> PatchedVanillaSystems = new Dictionary<string, PhaseData>();
     }
 }

@@ -31,8 +31,8 @@ namespace VanillaProfiler.Diagnostics
     {
         public sealed class Replacement
         {
-            public string VanillaSystem;
-            public string OwnerMod;
+            public string VanillaSystem = string.Empty;
+            public string OwnerMod = string.Empty;
         }
 
         // Hot-path snapshot of currently-patched vanilla System types. Read by
@@ -48,13 +48,13 @@ namespace VanillaProfiler.Diagnostics
         /// outside report cycles. O(1) hash lookup, safe to call from the
         /// SystemBase.Update Postfix hot path.
         /// </summary>
-        public static bool IsPatched(Type type)
+        public static bool IsPatched(Type? type)
         {
             if (type == null) return false;
             return s_PatchedTypes.Contains(type);
         }
 
-        public static List<Replacement> Scan()
+        public static IReadOnlyList<Replacement> Scan()
         {
             var result = new List<Replacement>();
             // Build the new patched-types set off to the side and swap it in
@@ -74,13 +74,13 @@ namespace VanillaProfiler.Diagnostics
                         var type = sys.GetType();
                         if (!ModAttribution.IsVanilla(type)) continue;
 
-                        string owners = ResolveOnUpdatePrefixOwners(type);
+                        string? owners = ResolveOnUpdatePrefixOwners(type);
                         if (owners == null) continue;
 
                         freshTypes.Add(type);
                         result.Add(new Replacement
                         {
-                            VanillaSystem = type.FullName,
+                            VanillaSystem = type.FullName ?? type.Name,
                             OwnerMod = owners,
                         });
                     }
@@ -101,14 +101,14 @@ namespace VanillaProfiler.Diagnostics
         /// targets SystemBase.Update, not OnUpdate, so it never appears here —
         /// the HARMONY_ID check guards against future drift.
         /// </summary>
-        private static string ResolveOnUpdatePrefixOwners(Type type)
+        private static string? ResolveOnUpdatePrefixOwners(Type type)
         {
             var onUpdate = AccessTools.Method(type, "OnUpdate");
             if (onUpdate == null) return null;
             var info = Harmony.GetPatchInfo(onUpdate);
             if (info == null || info.Prefixes == null) return null;
 
-            HashSet<string> set = null;
+            HashSet<string>? set = null;
             foreach (var prefix in info.Prefixes)
             {
                 if (prefix == null) continue;
@@ -116,7 +116,8 @@ namespace VanillaProfiler.Diagnostics
                     continue;
                 string mod = ModAttribution.Resolve(prefix.PatchMethod?.DeclaringType);
                 if (string.IsNullOrEmpty(mod)) continue;
-                if (mod == ModAttribution.VANILLA || mod == ModAttribution.PROFILER) continue;
+                if (string.Equals(mod, ModAttribution.VANILLA, StringComparison.Ordinal)
+                    || string.Equals(mod, ModAttribution.PROFILER, StringComparison.Ordinal)) continue;
                 set ??= new HashSet<string>(StringComparer.Ordinal);
                 set.Add(mod);
             }
@@ -135,7 +136,7 @@ namespace VanillaProfiler.Diagnostics
         /// snapshot, since this method runs once before any window has
         /// accumulated timing data.
         /// </summary>
-        public static void LogTo(Profiler profiler, List<Replacement> replacements)
+        public static void LogTo(Profiler profiler, IReadOnlyList<Replacement> replacements)
         {
             if (profiler == null || replacements == null) return;
             try

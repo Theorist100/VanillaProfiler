@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using Unity.Profiling;
-using Unity.Profiling.LowLevel.Unsafe;
 using UnityProfiler = UnityEngine.Profiling.Profiler;
 
 namespace VanillaProfiler.Aggregation
@@ -75,7 +73,7 @@ namespace VanillaProfiler.Aggregation
         // we read — GC.Collect at 4096 samples — so steady-state sampling never
         // reallocates after the first call. Memory cost ~64 KB.
         private const int SAMPLE_BUFFER_CAPACITY = 4096;
-        private readonly List<ProfilerRecorderSample> m_SampleBuffer = new(SAMPLE_BUFFER_CAPACITY);
+        private readonly ProfilerRecorderSamples m_Samples = new(SAMPLE_BUFFER_CAPACITY);
 
         public long BaselineManaged => m_BaselineManaged;
         public long BaselineMonoHeap => m_BaselineMonoHeap;
@@ -98,38 +96,11 @@ namespace VanillaProfiler.Aggregation
             // a sliding window of roughly the last 5 seconds — close to the default
             // ReportIntervalSec of 5s. Was 15 (~250ms) which gave reports a misleading
             // micro-window snapshot inconsistent with the surrounding 5-second cadence.
-            // Memory totals + process RSS.
-            m_VideoMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Video Used Memory");
-            m_AudioUsedRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Audio Used Memory");
-            m_SystemUsedRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
-            m_AppResidentRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "App Resident Memory");
-
-            // Render-thread timing breakdown.
-            m_MainThreadRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Main Thread Frame Time", FRAME_TIMING_SAMPLE_COUNT);
-            m_RenderThreadRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time", FRAME_TIMING_SAMPLE_COUNT);
-            m_GpuFrameTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "GPU Frame Time", FRAME_TIMING_SAMPLE_COUNT);
-            m_PresentWaitRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Gfx.WaitForPresentOnGfxThread", FRAME_TIMING_SAMPLE_COUNT);
-
-            // Per-frame render counts (LastValue, all confirmed in CS2 release via the
-            // MarkerEnumerator dump).
-            m_DrawCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count");
-            m_SetPassCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "SetPass Calls Count");
-            m_TrianglesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Triangles Count");
-            m_VerticesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Vertices Count");
-            m_ShadowCastersRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Shadow Casters Count");
-
-            // GPU memory breakdown — splits opaque Gfx total into buffers vs RTs.
-            m_UsedBuffersBytesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Used Buffers Bytes");
-            m_UsedBuffersCountRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Used Buffers Count");
-            m_RenderTexturesBytesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Render Textures Bytes");
-
-            // GC.Collect lives in a category that Unity 2022.3 doesn't expose as a typed
-            // ProfilerCategory constant — only by name in ProfilerRecorderHandle.GetAvailable.
-            // Cap 4096 — live CS2 1.5.7 logs hit 512 (the previous cap) every report after
-            // the city is loaded, with a worst-observed 637 ms stall in a 5 s window. Real
-            // count was higher; the ring was truncating. 4096 covers >800 collections/sec
-            // (truly pathological — needs city-scale allocation pressure) at ~64 KB cost.
-            m_GcCollectRecorder = StartByHandle("GC", "GC.Collect", 4096);
+            StartMemoryRecorders();
+            StartTimingRecorders();
+            StartRenderCountRecorders();
+            StartGpuBreakdownRecorders();
+            StartGcRecorder();
 
             // Speculative job-worker recorders were dropped: MarkerEnumerator confirmed
             // CS2 release strips JobsParallelFor.Execute / WaitForJobGroupID. Adding
@@ -154,6 +125,47 @@ namespace VanillaProfiler.Aggregation
                 $"BuffersCount={m_UsedBuffersCountRecorder.Valid} " +
                 $"RTBytes={m_RenderTexturesBytesRecorder.Valid} " +
                 $"GC.Collect={m_GcCollectRecorder.Valid}");
+        }
+
+        private void StartMemoryRecorders()
+        {
+            m_VideoMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Video Used Memory");
+            m_AudioUsedRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Audio Used Memory");
+            m_SystemUsedRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
+            m_AppResidentRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "App Resident Memory");
+        }
+
+        private void StartTimingRecorders()
+        {
+            m_MainThreadRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Render, "CPU Main Thread Frame Time", FRAME_TIMING_SAMPLE_COUNT);
+            m_RenderThreadRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Render, "CPU Render Thread Frame Time", FRAME_TIMING_SAMPLE_COUNT);
+            m_GpuFrameTimeRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Render, "GPU Frame Time", FRAME_TIMING_SAMPLE_COUNT);
+            m_PresentWaitRecorder = ProfilerRecorder.StartNew(
+                ProfilerCategory.Render, "Gfx.WaitForPresentOnGfxThread", FRAME_TIMING_SAMPLE_COUNT);
+        }
+
+        private void StartRenderCountRecorders()
+        {
+            m_DrawCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count");
+            m_SetPassCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "SetPass Calls Count");
+            m_TrianglesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Triangles Count");
+            m_VerticesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Vertices Count");
+            m_ShadowCastersRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Shadow Casters Count");
+        }
+
+        private void StartGpuBreakdownRecorders()
+        {
+            m_UsedBuffersBytesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Used Buffers Bytes");
+            m_UsedBuffersCountRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Used Buffers Count");
+            m_RenderTexturesBytesRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Render Textures Bytes");
+        }
+
+        private void StartGcRecorder()
+        {
+            m_GcCollectRecorder = ProfilerRecorderFactory.StartByHandle("GC", "GC.Collect", 4096);
         }
 
         public void Dispose()
@@ -184,43 +196,128 @@ namespace VanillaProfiler.Aggregation
 
         public MemorySample Sample(float reportIntervalSeconds)
         {
-            long managed = GC.GetTotalMemory(forceFullCollection: false);
-            long mono = UnityProfiler.GetMonoHeapSizeLong();
-            long nativeAlloc = UnityProfiler.GetTotalAllocatedMemoryLong();
-            long nativeReserved = UnityProfiler.GetTotalReservedMemoryLong();
+            var raw = ReadRawMemory();
+            var timing = ReadTimingCounters();
+            var render = ReadRenderCounters();
+            var gc = CaptureGcDelta();
+            double managedGrowthRate = UpdateManagedGrowth(raw.Managed, reportIntervalSeconds);
+            bool baselineJustCaptured = CaptureBaselines(raw);
+            return new MemorySample
+            {
+                ManagedBytes = raw.Managed,
+                MonoHeapBytes = raw.Mono,
+                NativeAllocBytes = raw.NativeAlloc,
+                NativeReservedBytes = raw.NativeReserved,
+                GfxUsedBytes = raw.GpuMemory,
+                AudioUsedBytes = raw.Audio,
+                SystemUsedBytes = raw.System,
+                GfxUsedAvailable = raw.GpuMemoryAvailable,
+                AudioUsedAvailable = raw.AudioAvailable,
+                SystemUsedAvailable = raw.SystemAvailable,
+                ManagedDelta = raw.Managed - m_BaselineManaged,
+                MonoHeapDelta = raw.Mono - m_BaselineMonoHeap,
+                NativeAllocDelta = raw.NativeAlloc - m_BaselineNativeAlloc,
+                NativeReservedDelta = raw.NativeReserved - m_BaselineNativeReserved,
+                GfxUsedDelta = m_GfxBaselineCaptured ? raw.GpuMemory - m_BaselineGfxUsed : 0,
+                AudioUsedDelta = raw.Audio - m_BaselineAudioUsed,
+                ManagedGrowthMBperSec = managedGrowthRate,
+                BaselineJustCaptured = baselineJustCaptured,
+                MainThreadCpuNs = timing.MainThread,
+                RenderThreadCpuNs = timing.RenderThread,
+                GpuFrameTimeNs = timing.GpuFrame,
+                PresentWaitNs = timing.PresentWait,
+                MainThreadCpuAvailable = timing.MainThreadAvailable,
+                RenderThreadCpuAvailable = timing.RenderThreadAvailable,
+                GpuFrameTimeAvailable = timing.GpuFrameAvailable,
+                PresentWaitAvailable = timing.PresentWaitAvailable,
+                DrawCallsCount = render.DrawCalls,
+                SetPassCallsCount = render.SetPass,
+                TrianglesCount = render.Triangles,
+                VerticesCount = render.Vertices,
+                ShadowCastersCount = render.ShadowCasters,
+                UsedBuffersBytes = render.BuffersBytes,
+                UsedBuffersCount = render.BuffersCount,
+                RenderTexturesBytes = render.RenderTexturesBytes,
+                DrawCallsAvailable = render.DrawCallsAvailable,
+                SetPassCallsAvailable = render.SetPassAvailable,
+                TrianglesAvailable = render.TrianglesAvailable,
+                VerticesAvailable = render.VerticesAvailable,
+                ShadowCastersAvailable = render.ShadowCastersAvailable,
+                UsedBuffersBytesAvailable = render.BuffersBytesAvailable,
+                UsedBuffersCountAvailable = render.BuffersCountAvailable,
+                RenderTexturesBytesAvailable = render.RenderTexturesBytesAvailable,
+                GcCollectTotalNs = gc.TotalNs,
+                GcCollectCount = gc.Count,
+                GcCollectAvailable = gc.Available,
+                AppResidentBytes = raw.AppResident,
+                AppResidentAvailable = raw.AppResidentAvailable,
+            };
+        }
 
-            // GPU memory: Unity's "Gfx Used Memory" marker isn't registered on this
-            // CS2 build (verified via ProfilerRecorderHandle.GetAvailable). Use the
-            // legacy graphics-driver API which talks to the driver directly.
+        private (long Managed, long Mono, long NativeAlloc, long NativeReserved, long GpuMemory,
+            long Audio, long System, long AppResident, bool GpuMemoryAvailable, bool AudioAvailable,
+            bool SystemAvailable, bool AppResidentAvailable) ReadRawMemory()
+        {
             long gpuMemory = UnityProfiler.GetAllocatedMemoryForGraphicsDriver();
+            bool gpuMemoryAvailable = gpuMemory > 0 || m_VideoMemoryRecorder.Valid;
             if (gpuMemory == 0) gpuMemory = ReadValid(m_VideoMemoryRecorder);
-            long audio = ReadValid(m_AudioUsedRecorder);
-            long system = ReadValid(m_SystemUsedRecorder);
-            long mainThread = AverageValid(m_MainThreadRecorder);
-            long renderThread = AverageValid(m_RenderThreadRecorder);
-            long gpuFrame = AverageValid(m_GpuFrameTimeRecorder);
-            long presentWait = AverageValid(m_PresentWaitRecorder);
-            // Render counts: LastValue, not average — these are per-frame totals already.
-            long drawCalls = ReadValid(m_DrawCallsRecorder);
-            long setPass = ReadValid(m_SetPassCallsRecorder);
-            long triangles = ReadValid(m_TrianglesRecorder);
-            long vertices = ReadValid(m_VerticesRecorder);
-            long shadowCasters = ReadValid(m_ShadowCastersRecorder);
-            long buffersBytes = ReadValid(m_UsedBuffersBytesRecorder);
-            long buffersCount = ReadValid(m_UsedBuffersCountRecorder);
-            long rtBytes = ReadValid(m_RenderTexturesBytesRecorder);
-            long appResident = ReadValid(m_AppResidentRecorder);
-            // GC: hybrid count + stall computation.
-            //   COUNT: System.GC.CollectionCount is cumulative across process lifetime —
-            //          subtract from previous sample for an exact per-window delta with
-            //          no ring-overflow risk.
-            //   STALL: ProfilerRecorder GC.Collect sum delta. Accurate while the ring
-            //          (capacity 4096) holds more than one window of GCs — at typical
-            //          24 GCs/sec we have ~170 s of headroom before delta starts to drift.
+            return (
+                GC.GetTotalMemory(forceFullCollection: false),
+                UnityProfiler.GetMonoHeapSizeLong(),
+                UnityProfiler.GetTotalAllocatedMemoryLong(),
+                UnityProfiler.GetTotalReservedMemoryLong(),
+                gpuMemory,
+                ReadValid(m_AudioUsedRecorder),
+                ReadValid(m_SystemUsedRecorder),
+                ReadValid(m_AppResidentRecorder),
+                gpuMemoryAvailable,
+                m_AudioUsedRecorder.Valid,
+                m_SystemUsedRecorder.Valid,
+                m_AppResidentRecorder.Valid);
+        }
+
+        private (long MainThread, long RenderThread, long GpuFrame, long PresentWait,
+            bool MainThreadAvailable, bool RenderThreadAvailable, bool GpuFrameAvailable,
+            bool PresentWaitAvailable) ReadTimingCounters()
+            => (
+                m_Samples.Average(m_MainThreadRecorder),
+                m_Samples.Average(m_RenderThreadRecorder),
+                m_Samples.Average(m_GpuFrameTimeRecorder),
+                m_Samples.Average(m_PresentWaitRecorder),
+                m_MainThreadRecorder.Valid,
+                m_RenderThreadRecorder.Valid,
+                m_GpuFrameTimeRecorder.Valid,
+                m_PresentWaitRecorder.Valid);
+
+        private (long DrawCalls, long SetPass, long Triangles, long Vertices, long ShadowCasters,
+            long BuffersBytes, long BuffersCount, long RenderTexturesBytes, bool DrawCallsAvailable,
+            bool SetPassAvailable, bool TrianglesAvailable, bool VerticesAvailable,
+            bool ShadowCastersAvailable, bool BuffersBytesAvailable, bool BuffersCountAvailable,
+            bool RenderTexturesBytesAvailable) ReadRenderCounters()
+            => (
+                ReadValid(m_DrawCallsRecorder),
+                ReadValid(m_SetPassCallsRecorder),
+                ReadValid(m_TrianglesRecorder),
+                ReadValid(m_VerticesRecorder),
+                ReadValid(m_ShadowCastersRecorder),
+                ReadValid(m_UsedBuffersBytesRecorder),
+                ReadValid(m_UsedBuffersCountRecorder),
+                ReadValid(m_RenderTexturesBytesRecorder),
+                m_DrawCallsRecorder.Valid,
+                m_SetPassCallsRecorder.Valid,
+                m_TrianglesRecorder.Valid,
+                m_VerticesRecorder.Valid,
+                m_ShadowCastersRecorder.Valid,
+                m_UsedBuffersBytesRecorder.Valid,
+                m_UsedBuffersCountRecorder.Valid,
+                m_RenderTexturesBytesRecorder.Valid);
+
+        private (long TotalNs, long Count, bool Available) CaptureGcDelta()
+        {
             int curGen0 = GC.CollectionCount(0);
             int curGen1 = GC.CollectionCount(1);
             int curGen2 = GC.CollectionCount(2);
-            (long curGcStallSumNs, _) = SumWithCount(m_GcCollectRecorder);
+            (long curGcStallSumNs, _) = m_Samples.SumWithCount(m_GcCollectRecorder);
             long gcTotalNs = 0;
             long gcCount = 0;
             if (m_GcBaselineCaptured)
@@ -236,77 +333,50 @@ namespace VanillaProfiler.Aggregation
             m_PrevGen2Count = curGen2;
             m_PrevGcStallSumNs = curGcStallSumNs;
             m_GcBaselineCaptured = true;
+            return (gcTotalNs, gcCount, m_GcCollectRecorder.Valid);
+        }
 
-            double managedGrowthRate;
+        private double UpdateManagedGrowth(long managed, float reportIntervalSeconds)
+        {
             if (!m_GrowthBaselineCaptured)
             {
                 m_LastReportManagedBytes = managed;
                 m_GrowthBaselineCaptured = true;
-                managedGrowthRate = 0;
-            }
-            else
-            {
-                long managedDelta = managed - m_LastReportManagedBytes;
-                managedGrowthRate = reportIntervalSeconds > 0
-                    ? managedDelta / BYTES_PER_MB / reportIntervalSeconds
-                    : 0;
-                m_LastReportManagedBytes = managed;
+                return 0;
             }
 
-            bool baselineJustCaptured = false;
-            if (!m_BaselineCaptured)
-            {
-                m_BaselineManaged = managed;
-                m_BaselineMonoHeap = mono;
-                m_BaselineNativeAlloc = nativeAlloc;
-                m_BaselineNativeReserved = nativeReserved;
-                m_BaselineAudioUsed = audio;
-                m_BaselineCaptured = true;
-                baselineJustCaptured = true;
-            }
+            long managedDelta = managed - m_LastReportManagedBytes;
+            m_LastReportManagedBytes = managed;
+            return reportIntervalSeconds > 0 ? managedDelta / BYTES_PER_MB / reportIntervalSeconds : 0;
+        }
 
-            // GPU memory can report 0 before the driver warms up, or forever when the
-            // marker/API is stripped. Keep the core memory baseline live immediately
-            // and baseline GPU separately only once it becomes a real signal.
-            if (!m_GfxBaselineCaptured && gpuMemory > 0)
+        private bool CaptureBaselines(
+            (long Managed, long Mono, long NativeAlloc, long NativeReserved, long GpuMemory,
+                long Audio, long System, long AppResident, bool GpuMemoryAvailable, bool AudioAvailable,
+                bool SystemAvailable, bool AppResidentAvailable) raw)
+        {
+            bool baselineJustCaptured = CaptureMemoryBaseline(raw);
+            if (!m_GfxBaselineCaptured && raw.GpuMemory > 0)
             {
-                m_BaselineGfxUsed = gpuMemory;
+                m_BaselineGfxUsed = raw.GpuMemory;
                 m_GfxBaselineCaptured = true;
             }
+            return baselineJustCaptured;
+        }
 
-            return new MemorySample
-            {
-                ManagedBytes = managed,
-                MonoHeapBytes = mono,
-                NativeAllocBytes = nativeAlloc,
-                NativeReservedBytes = nativeReserved,
-                GfxUsedBytes = gpuMemory,
-                AudioUsedBytes = audio,
-                SystemUsedBytes = system,
-                ManagedDelta = managed - m_BaselineManaged,
-                MonoHeapDelta = mono - m_BaselineMonoHeap,
-                NativeAllocDelta = nativeAlloc - m_BaselineNativeAlloc,
-                NativeReservedDelta = nativeReserved - m_BaselineNativeReserved,
-                GfxUsedDelta = m_GfxBaselineCaptured ? gpuMemory - m_BaselineGfxUsed : 0,
-                AudioUsedDelta = audio - m_BaselineAudioUsed,
-                ManagedGrowthMBperSec = managedGrowthRate,
-                BaselineJustCaptured = baselineJustCaptured,
-                MainThreadCpuNs = mainThread,
-                RenderThreadCpuNs = renderThread,
-                GpuFrameTimeNs = gpuFrame,
-                PresentWaitNs = presentWait,
-                DrawCallsCount = drawCalls,
-                SetPassCallsCount = setPass,
-                TrianglesCount = triangles,
-                VerticesCount = vertices,
-                ShadowCastersCount = shadowCasters,
-                UsedBuffersBytes = buffersBytes,
-                UsedBuffersCount = buffersCount,
-                RenderTexturesBytes = rtBytes,
-                GcCollectTotalNs = gcTotalNs,
-                GcCollectCount = gcCount,
-                AppResidentBytes = appResident,
-            };
+        private bool CaptureMemoryBaseline(
+            (long Managed, long Mono, long NativeAlloc, long NativeReserved, long GpuMemory,
+                long Audio, long System, long AppResident, bool GpuMemoryAvailable, bool AudioAvailable,
+                bool SystemAvailable, bool AppResidentAvailable) raw)
+        {
+            if (m_BaselineCaptured) return false;
+            m_BaselineManaged = raw.Managed;
+            m_BaselineMonoHeap = raw.Mono;
+            m_BaselineNativeAlloc = raw.NativeAlloc;
+            m_BaselineNativeReserved = raw.NativeReserved;
+            m_BaselineAudioUsed = raw.Audio;
+            m_BaselineCaptured = true;
+            return true;
         }
 
         public void ResetBaseline()
@@ -324,65 +394,5 @@ namespace VanillaProfiler.Aggregation
 
         private static long ReadValid(ProfilerRecorder r) => r.Valid ? r.LastValue : 0;
 
-        private long AverageValid(ProfilerRecorder r)
-        {
-            if (!r.Valid || r.Capacity == 0) return 0;
-            int count = r.Count;
-            if (count == 0) return 0;
-            m_SampleBuffer.Clear();
-            r.CopyTo(m_SampleBuffer);
-            long sum = 0;
-            int n = m_SampleBuffer.Count;
-            for (int i = 0; i < n; i++)
-                sum += m_SampleBuffer[i].Value;
-            return n > 0 ? sum / n : 0;
-        }
-
-        // Resolve a marker by category name + statName when the typed
-        // ProfilerCategory constant isn't exposed (e.g. "GC" in 2022.3). Falls back
-        // to a default recorder when no match is found — reads stay at zero.
-        private static ProfilerRecorder StartByHandle(string categoryName, string statName, int capacity)
-        {
-            var handles = new List<ProfilerRecorderHandle>(256);
-            try
-            {
-                ProfilerRecorderHandle.GetAvailable(handles);
-            }
-            catch
-            {
-                return default;
-            }
-            for (int i = 0; i < handles.Count; i++)
-            {
-                var desc = ProfilerRecorderHandle.GetDescription(handles[i]);
-                if (string.Equals(desc.Category.Name, categoryName, StringComparison.Ordinal)
-                    && string.Equals(desc.Name, statName, StringComparison.Ordinal))
-                {
-                    // ProfilerRecorder constructor takes a handle + capacity; the typed
-                    // StartNew(category, name, capacity) factory only accepts ProfilerCategory.
-                    var recorder = new ProfilerRecorder(handles[i], capacity, ProfilerRecorderOptions.Default);
-                    recorder.Start();
-                    return recorder;
-                }
-            }
-            return default;
-        }
-
-        // For event-style markers (GC.Collect fires once per collection): sum all
-        // captured samples to get total work over the window, plus the count of
-        // events. Returns (0, 0) when the recorder is invalid or empty.
-        private (long sum, long count) SumWithCount(ProfilerRecorder r)
-        {
-            if (!r.Valid || r.Capacity == 0) return (0, 0);
-            int n = r.Count;
-            if (n == 0) return (0, 0);
-            m_SampleBuffer.Clear();
-            r.CopyTo(m_SampleBuffer);
-            long sum = 0;
-            int captured = m_SampleBuffer.Count;
-            for (int i = 0; i < captured; i++)
-                sum += m_SampleBuffer[i].Value;
-            return (sum, captured);
-        }
     }
 }

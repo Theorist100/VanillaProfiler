@@ -43,11 +43,11 @@ namespace VanillaProfiler.Diagnostics
 
         public sealed class ConflictEntry
         {
-            public string Method;
-            public List<string> Owners;
+            public string Method = string.Empty;
+            public IReadOnlyList<string> Owners = Array.Empty<string>();
         }
 
-        private static List<ConflictEntry> Detect()
+        private static IReadOnlyList<ConflictEntry> Detect()
         {
             var result = new List<ConflictEntry>();
             foreach (var method in Harmony.GetAllPatchedMethods().ToArray())
@@ -83,7 +83,7 @@ namespace VanillaProfiler.Diagnostics
             return result;
         }
 
-        private static void AddOwners(HashSet<string> set, IEnumerable<Patch> patches)
+        private static void AddOwners(HashSet<string> set, IEnumerable<Patch>? patches)
         {
             if (patches == null) return;
             foreach (var p in patches)

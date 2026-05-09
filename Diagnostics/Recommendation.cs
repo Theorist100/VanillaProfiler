@@ -13,8 +13,8 @@ namespace VanillaProfiler.Diagnostics
     public sealed class Recommendation
     {
         public RecommendationLevel Level;
-        public string Title;       // short label, ≤ 40 chars
-        public string Action;      // user instruction, ≤ 60 chars per line
-        public string Reason;      // why we suggest it, optional, ≤ 60 chars
+        public string Title = string.Empty;       // short label, ≤ 40 chars
+        public string Action = string.Empty;      // user instruction, ≤ 60 chars per line
+        public string Reason = string.Empty;      // why we suggest it, optional, ≤ 60 chars
     }
 }

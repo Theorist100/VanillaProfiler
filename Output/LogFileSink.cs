@@ -22,7 +22,7 @@ namespace VanillaProfiler.Output
         private const double BYTES_PER_MB = 1024.0 * 1024.0;
 
         private readonly string m_LogDir;
-        private StreamWriter m_Writer;
+        private StreamWriter? m_Writer;
         private DateTime m_LastIoFailureLogUtc = DateTime.MinValue;
         private DateTime m_NextOpenRetryUtc = DateTime.MinValue;
         private bool m_Shutdown;
@@ -92,9 +92,9 @@ namespace VanillaProfiler.Output
             lock (m_WriteLock)
             {
                 WriteLine("");
-                WriteLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot?.WindowSeconds:F1}s) ══════"));
+                WriteLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot.WindowSeconds:F1}s) ══════"));
 
-                if (snapshot != null && metrics.FrameCount > 0)
+                if (metrics.FrameCount > 0)
                 {
                     WriteLine(Inv($"Render: {snapshot.AvgFps:F1} FPS ({snapshot.MinFps:F1} min) | Frame: {snapshot.AvgFrameMs:F1}ms avg, {snapshot.MaxFrameMs:F1}ms max | Sim: {snapshot.SimTicksPerSec:F0} ticks/s"));
                     WriteLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
@@ -148,7 +148,7 @@ namespace VanillaProfiler.Output
 
         // ---------- Section writers ----------
 
-        private void WritePhaseTable(Dictionary<string, PhaseData> phases)
+        private void WritePhaseTable(IReadOnlyDictionary<string, PhaseData> phases)
         {
             if (phases.Count == 0) return;
             m_SortBuffer.Clear();
@@ -168,7 +168,7 @@ namespace VanillaProfiler.Output
             }
         }
 
-        private void WriteSystemTable(string header, Dictionary<string, PhaseData> systems, int maxRows)
+        private void WriteSystemTable(string header, IReadOnlyDictionary<string, PhaseData> systems, int maxRows)
         {
             if (systems.Count == 0) return;
             m_SortBuffer.Clear();
@@ -200,24 +200,38 @@ namespace VanillaProfiler.Output
         {
             if (mem.BaselineJustCaptured)
             {
-                WriteLine("");
-                WriteLine("MEMORY BASELINE");
-                WriteLine(new string('─', 50));
-                WriteLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB"));
-                WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB"));
-                WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB"));
-                WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB"));
-                if (mem.GfxUsedBytes > 0)
-                    WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
-                if (mem.AudioUsedBytes > 0)
-                    WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
-                if (mem.SystemUsedBytes > 0)
-                    WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
-                if (mem.AppResidentBytes > 0)
-                    WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB  (real physical RAM)"));
+                WriteMemoryBaseline(mem);
+                WriteCounterAvailability(mem);
                 return;
             }
 
+            WriteMemoryDeltas(mem);
+            WriteHardwareCounters(mem);
+            WriteRenderCounters(mem);
+            WriteCounterAvailability(mem);
+        }
+
+        private void WriteMemoryBaseline(MemorySample mem)
+        {
+            WriteLine("");
+            WriteLine("MEMORY BASELINE");
+            WriteLine(new string('─', 50));
+            WriteLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB"));
+            WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB"));
+            WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB"));
+            WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.GfxUsedBytes > 0)
+                WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.AudioUsedBytes > 0)
+                WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.SystemUsedBytes > 0)
+                WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+            if (mem.AppResidentBytes > 0)
+                WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB  (real physical RAM)"));
+        }
+
+        private void WriteMemoryDeltas(MemorySample mem)
+        {
             WriteLine("");
             WriteLine(Inv($"MEMORY (delta from baseline)  |  Managed growth: {mem.ManagedGrowthMBperSec:+0.00;-0.00} MB/s"));
             WriteLine(new string('─', 50));
@@ -233,16 +247,20 @@ namespace VanillaProfiler.Output
                 WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.AppResidentBytes > 0)
                 WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB"));
-            // GPU memory breakdown — splits the opaque Gfx total into buffers vs RTs so
-            // a leaking subsystem can be told apart from textures growing under streaming.
+        }
+
+        private void WriteHardwareCounters(MemorySample mem)
+        {
             if (mem.UsedBuffersBytes > 0 || mem.RenderTexturesBytes > 0)
                 WriteLine(Inv($"  GPU breakdown:    Buffers {mem.UsedBuffersBytes / BYTES_PER_MB,7:F1} MB ({mem.UsedBuffersCount} bufs),  RT {mem.RenderTexturesBytes / BYTES_PER_MB,7:F1} MB"));
             if (mem.MainThreadCpuNs > 0 || mem.RenderThreadCpuNs > 0)
                 WriteLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
-            // PresentWait isolates GPU-bound vs CPU-bound: high PresentWait + low Main
-            // = GPU bottleneck, ECS-side optimisation will not help FPS.
             if (mem.PresentWaitNs > 0)
                 WriteLine(Inv($"  Present wait:     {mem.PresentWaitNs / 1_000_000.0,5:F2} ms  (CPU stalled on GPU swapchain)"));
+        }
+
+        private void WriteRenderCounters(MemorySample mem)
+        {
             if (mem.DrawCallsCount > 0 || mem.SetPassCallsCount > 0 || mem.TrianglesCount > 0)
             {
                 WriteLine(Inv($"  Render counts:    DrawCalls {mem.DrawCallsCount,5},  SetPass {mem.SetPassCallsCount,4},  Shadow casters {mem.ShadowCastersCount,5}"));
@@ -252,13 +270,25 @@ namespace VanillaProfiler.Output
                 WriteLine(Inv($"  GC.Collect:       {mem.GcCollectCount} collections,  total stall {mem.GcCollectTotalNs / 1_000_000.0,6:F2} ms"));
         }
 
+        private void WriteCounterAvailability(MemorySample mem)
+        {
+            WriteLine(ReportTextSections.CompactCounterStatus(
+                mem.MainThreadCpuAvailable,
+                mem.RenderThreadCpuAvailable,
+                mem.GpuFrameTimeAvailable,
+                mem.PresentWaitAvailable,
+                mem.DrawCallsAvailable,
+                mem.SetPassCallsAvailable,
+                mem.GcCollectAvailable));
+        }
+
         private void WriteHealthSummary(HealthReport h)
         {
-            if (h == null) return;
             WriteLine("");
             WriteLine($"HEALTH  FPS:{h.FpsLevel}  STUTTER:{h.StutterLevel}  MEM:{h.MemoryLevel}  GROWTH:{h.GrowthLevel}  →  OVERALL:{h.Overall}");
             WriteLine($"BOTTLENECK  {h.Bottleneck}  —  {h.BottleneckHint}");
-            if (!string.IsNullOrEmpty(h.MemoryHint) && h.MemoryHint != "Stable")
+            if (!string.IsNullOrEmpty(h.MemoryHint)
+                && !string.Equals(h.MemoryHint, "Stable", StringComparison.Ordinal))
                 WriteLine($"MEMORY  {h.MemoryHint}");
         }
 
@@ -315,7 +345,7 @@ namespace VanillaProfiler.Output
             var writer = new StreamWriter(stream) { AutoFlush = true };
             writer.WriteLine();
             writer.WriteLine(Inv($"=== Vanilla Profiler session === {DateTime.Now:yyyy-MM-dd HH:mm:ss}"));
-            writer.WriteLine(Inv($"Report interval: {SettingsStore.Current.ReportIntervalSec}s"));
+            writer.WriteLine(Inv($"Report interval: {SettingsStore.Snapshot.Settings.ReportIntervalSec}s"));
             writer.WriteLine();
             writer.WriteLine("NOTE on per-system numbers below:");
             writer.WriteLine("  These reflect main-thread cost only — scheduling overhead, sync points,");

@@ -19,19 +19,22 @@ namespace VanillaProfiler.Diagnostics
             set { SettingsStore.Current.SpikeScreenshots = value; SettingsStore.Save(); }
         }
 
-        private static double SpikeMs => SettingsStore.Current.SpikeThresholdMs;
-
         private static float s_LastCaptureRealtime = float.NegativeInfinity;
         private static int s_TotalCaptured;
         private static int s_SessionSerial;
-        private static string s_OutputDir;
+        private static string? s_OutputDir;
         private static bool s_DirChecked;
 
         public static int TotalCaptured => s_TotalCaptured;
 
         public static void OnFrame(double frameMs)
         {
-            if (!Enabled || frameMs < SpikeMs) return;
+            OnFrame(frameMs, SettingsStore.Snapshot);
+        }
+
+        public static void OnFrame(double frameMs, ProfilerSettingsSnapshot settings)
+        {
+            if (!settings.Settings.SpikeScreenshots || frameMs < settings.Settings.SpikeThresholdMs) return;
 
             float now = Time.realtimeSinceStartup;
             if (now - s_LastCaptureRealtime < COOLDOWN_S) return;

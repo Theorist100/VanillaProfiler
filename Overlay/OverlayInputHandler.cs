@@ -11,12 +11,12 @@ namespace VanillaProfiler.Overlay
     /// </summary>
     public sealed class OverlayInputHandler
     {
-        public event EventHandler OnToggleSettings;       // Ctrl+F8
-        public event EventHandler OnCycleMode;            // Ctrl+F9
-        public event EventHandler OnForceDump;            // Ctrl+F10
-        public event EventHandler OnExportReport;         // Ctrl+F11
-        public event EventHandler OnCyclePosition;        // Ctrl+F12
-        public event EventHandler OnToggleScreenshots;    // Ctrl+F7
+        public event EventHandler? OnToggleSettings;       // Ctrl+F8
+        public event EventHandler? OnCycleMode;            // Ctrl+F9
+        public event EventHandler? OnForceDump;            // Ctrl+F10
+        public event EventHandler? OnExportReport;         // Ctrl+F11
+        public event EventHandler? OnCyclePosition;        // Ctrl+F12
+        public event EventHandler? OnToggleScreenshots;    // Ctrl+F7
 
         public void Poll(bool settingsOpen)
         {

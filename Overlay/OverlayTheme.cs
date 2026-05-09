@@ -5,8 +5,7 @@ using VanillaProfiler.Diagnostics;
 namespace VanillaProfiler.Overlay
 {
     /// <summary>
-    /// Single source of truth for overlay visuals — Classic Gold palette
-    /// (mirrors CivicSurvival/UI/src/themes/classicGold.ts).
+    /// Single source of truth for overlay visuals — Classic Gold palette.
     /// All textures and GUIStyles are created lazily on first OnGUI access
     /// because GUI.skin isn't ready in Awake/Start.
     /// </summary>
@@ -27,26 +26,26 @@ namespace VanillaProfiler.Overlay
         // Lazily-built resources
         private bool m_Initialized;
 
-        public Texture2D BgTexture { get; private set; }
-        public Texture2D BorderTexture { get; private set; }
-        public Texture2D AccentTexture { get; private set; }
+        public Texture2D BgTexture { get; private set; } = null!;
+        public Texture2D BorderTexture { get; private set; } = null!;
+        public Texture2D AccentTexture { get; private set; } = null!;
 
-        public GUIStyle BoxStyle { get; private set; }
-        public GUIStyle HeaderStyle { get; private set; }
-        public GUIStyle SectionStyle { get; private set; }
-        public GUIStyle BodyStyle { get; private set; }
-        public GUIStyle DimStyle { get; private set; }
-        public GUIStyle HintStyle { get; private set; }
-        public GUIStyle BadgeStyle { get; private set; }
-        public GUIStyle ButtonStyle { get; private set; }
-        public GUIStyle TextFieldStyle { get; private set; }
-        public GUIStyle ToggleStyle { get; private set; }
+        public GUIStyle BoxStyle { get; private set; } = null!;
+        public GUIStyle HeaderStyle { get; private set; } = null!;
+        public GUIStyle SectionStyle { get; private set; } = null!;
+        public GUIStyle BodyStyle { get; private set; } = null!;
+        public GUIStyle DimStyle { get; private set; } = null!;
+        public GUIStyle HintStyle { get; private set; } = null!;
+        public GUIStyle BadgeStyle { get; private set; } = null!;
+        public GUIStyle ButtonStyle { get; private set; } = null!;
+        public GUIStyle TextFieldStyle { get; private set; } = null!;
+        public GUIStyle ToggleStyle { get; private set; } = null!;
 
         // Pre-built coloured variants — referenced by HealthLevel / BottleneckKind to avoid
         // allocating a new GUIStyle every OnGUI frame would add avoidable managed growth
         // to the profiler itself.
-        private GUIStyle[] m_HealthStyles;        // indexed by (int)HealthLevel
-        private GUIStyle[] m_BottleneckStyles;    // indexed by (int)BottleneckKind
+        private GUIStyle[] m_HealthStyles = Array.Empty<GUIStyle>();        // indexed by (int)HealthLevel
+        private GUIStyle[] m_BottleneckStyles = Array.Empty<GUIStyle>();    // indexed by (int)BottleneckKind
 
         /// <summary>Must be called from OnGUI before any drawing — GUI.skin is null earlier.</summary>
         public void EnsureInitialized()
@@ -55,93 +54,10 @@ namespace VanillaProfiler.Overlay
 
             try
             {
-                BgTexture = MakeTex(BG);
-                BorderTexture = MakeTex(BORDER);
-                AccentTexture = MakeTex(ACCENT_GOLD);
-
-                BoxStyle = new GUIStyle(GUI.skin.box)
-                {
-                    border = new RectOffset(0, 0, 0, 0),
-                    padding = new RectOffset(0, 0, 0, 0),
-                };
-                BoxStyle.normal.background = BgTexture;
-
-                HeaderStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 13,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleLeft,
-                };
-                HeaderStyle.normal.textColor = ACCENT_GOLD;
-
-                SectionStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 11,
-                    fontStyle = FontStyle.Bold,
-                };
-                SectionStyle.normal.textColor = ACCENT_GOLD;
-
-                BodyStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
-                BodyStyle.normal.textColor = TEXT_PRIMARY;
-
-                DimStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
-                DimStyle.normal.textColor = TEXT_SECONDARY;
-
-                HintStyle = new GUIStyle(GUI.skin.label) { fontSize = 10 };
-                HintStyle.normal.textColor = TEXT_MUTED;
-
-                BadgeStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 12,
-                    alignment = TextAnchor.MiddleCenter,
-                };
-                BadgeStyle.normal.textColor = ACCENT_GOLD;
-
-                ButtonStyle = new GUIStyle(GUI.skin.button)
-                {
-                    fontSize = 12,
-                    alignment = TextAnchor.MiddleCenter,
-                    padding = new RectOffset(6, 6, 5, 7),
-                };
-
-                TextFieldStyle = new GUIStyle(GUI.skin.textField)
-                {
-                    fontSize = 13,
-                    alignment = TextAnchor.MiddleLeft,
-                    padding = new RectOffset(6, 4, 4, 7),
-                };
-
-                ToggleStyle = new GUIStyle(GUI.skin.toggle)
-                {
-                    fontSize = 12,
-                    alignment = TextAnchor.MiddleLeft,
-                    padding = new RectOffset(24, 4, 4, 7),
-                };
-                ToggleStyle.normal.textColor = TEXT_PRIMARY;
-                ToggleStyle.onNormal.textColor = TEXT_PRIMARY;
-                ToggleStyle.hover.textColor = TEXT_PRIMARY;
-                ToggleStyle.onHover.textColor = TEXT_PRIMARY;
-                ToggleStyle.active.textColor = TEXT_PRIMARY;
-                ToggleStyle.onActive.textColor = TEXT_PRIMARY;
-                ToggleStyle.focused.textColor = TEXT_PRIMARY;
-                ToggleStyle.onFocused.textColor = TEXT_PRIMARY;
-
-                // Pre-build the variant tables so per-frame Style* calls just index into them.
-                m_HealthStyles = new[]
-                {
-                    BodyStyle,                  // Unknown
-                    BuildColored(SUCCESS),     // Good
-                    BuildColored(WARNING),     // Ok
-                    BuildColored(ERROR_RED),   // Poor
-                };
-                m_BottleneckStyles = new[]
-                {
-                    BodyStyle,                  // Unknown
-                    BodyStyle,                  // Balanced
-                    BuildColored(WARNING),      // RenderBound
-                    BuildColored(WARNING),      // SimBound
-                    BuildColored(ERROR_RED),    // MemoryBound
-                };
+                BuildTextures();
+                BuildBaseStyles();
+                BuildInputStyles();
+                BuildVariantStyles();
                 m_Initialized = true;
             }
             catch
@@ -149,6 +65,98 @@ namespace VanillaProfiler.Overlay
                 Release();
                 throw;
             }
+        }
+
+        private void BuildTextures()
+        {
+            BgTexture = MakeTex(BG);
+            BorderTexture = MakeTex(BORDER);
+            AccentTexture = MakeTex(ACCENT_GOLD);
+        }
+
+        private void BuildBaseStyles()
+        {
+            BoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                border = new RectOffset(0, 0, 0, 0),
+                padding = new RectOffset(0, 0, 0, 0),
+            };
+            BoxStyle.normal.background = BgTexture;
+
+            HeaderStyle = LabelStyle(13, ACCENT_GOLD, FontStyle.Bold, TextAnchor.MiddleLeft);
+            SectionStyle = LabelStyle(11, ACCENT_GOLD, FontStyle.Bold, TextAnchor.UpperLeft);
+            BodyStyle = LabelStyle(12, TEXT_PRIMARY, FontStyle.Normal, TextAnchor.UpperLeft);
+            DimStyle = LabelStyle(12, TEXT_SECONDARY, FontStyle.Normal, TextAnchor.UpperLeft);
+            HintStyle = LabelStyle(10, TEXT_MUTED, FontStyle.Normal, TextAnchor.UpperLeft);
+            BadgeStyle = LabelStyle(12, ACCENT_GOLD, FontStyle.Normal, TextAnchor.MiddleCenter);
+        }
+
+        private void BuildInputStyles()
+        {
+            ButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(6, 6, 5, 7),
+            };
+
+            TextFieldStyle = new GUIStyle(GUI.skin.textField)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleLeft,
+                padding = new RectOffset(6, 4, 4, 7),
+            };
+
+            ToggleStyle = new GUIStyle(GUI.skin.toggle)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.MiddleLeft,
+                padding = new RectOffset(24, 4, 4, 7),
+            };
+            SetAllToggleTextColors(TEXT_PRIMARY);
+        }
+
+        private void BuildVariantStyles()
+        {
+            m_HealthStyles = new[]
+            {
+                BodyStyle,
+                BuildColored(SUCCESS),
+                BuildColored(WARNING),
+                BuildColored(ERROR_RED),
+            };
+            m_BottleneckStyles = new[]
+            {
+                BodyStyle,
+                BodyStyle,
+                BuildColored(WARNING),
+                BuildColored(WARNING),
+                BuildColored(ERROR_RED),
+            };
+        }
+
+        private static GUIStyle LabelStyle(int fontSize, Color color, FontStyle fontStyle, TextAnchor alignment)
+        {
+            var style = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = fontSize,
+                fontStyle = fontStyle,
+                alignment = alignment,
+            };
+            style.normal.textColor = color;
+            return style;
+        }
+
+        private void SetAllToggleTextColors(Color color)
+        {
+            ToggleStyle.normal.textColor = color;
+            ToggleStyle.onNormal.textColor = color;
+            ToggleStyle.hover.textColor = color;
+            ToggleStyle.onHover.textColor = color;
+            ToggleStyle.active.textColor = color;
+            ToggleStyle.onActive.textColor = color;
+            ToggleStyle.focused.textColor = color;
+            ToggleStyle.onFocused.textColor = color;
         }
 
         public GUIStyle StyleForHealth(HealthLevel level)
@@ -170,18 +178,18 @@ namespace VanillaProfiler.Overlay
             BgTexture = DestroyTexture(BgTexture);
             BorderTexture = DestroyTexture(BorderTexture);
             AccentTexture = DestroyTexture(AccentTexture);
-            BoxStyle = null;
-            HeaderStyle = null;
-            SectionStyle = null;
-            BodyStyle = null;
-            DimStyle = null;
-            HintStyle = null;
-            BadgeStyle = null;
-            ButtonStyle = null;
-            TextFieldStyle = null;
-            ToggleStyle = null;
-            m_HealthStyles = null;
-            m_BottleneckStyles = null;
+            BoxStyle = null!;
+            HeaderStyle = null!;
+            SectionStyle = null!;
+            BodyStyle = null!;
+            DimStyle = null!;
+            HintStyle = null!;
+            BadgeStyle = null!;
+            ButtonStyle = null!;
+            TextFieldStyle = null!;
+            ToggleStyle = null!;
+            m_HealthStyles = Array.Empty<GUIStyle>();
+            m_BottleneckStyles = Array.Empty<GUIStyle>();
             m_Initialized = false;
         }
 
@@ -209,11 +217,11 @@ namespace VanillaProfiler.Overlay
             return tex;
         }
 
-        private static Texture2D DestroyTexture(Texture2D texture)
+        private static Texture2D DestroyTexture(Texture2D? texture)
         {
-            if (texture == null) return null;
+            if (texture == null) return null!;
             UnityEngine.Object.Destroy(texture);
-            return null;
+            return null!;
         }
     }
 }

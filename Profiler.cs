@@ -23,21 +23,19 @@ namespace VanillaProfiler
     /// <c>m_Disposed</c> rejects stale calls after the mod has been disposed. ProfilerHost still uses
     /// Volatile.Read/Write for explicit static publication across Harmony entry points.
     /// </remarks>
-    public sealed class Profiler : IDisposable
+    public sealed class Profiler : IProfilerHotPath, IDisposable
     {
-        private const double MS_PER_SECOND = 1000.0;
         private const double SPIKE_30FPS_MS = 1000.0 / 30.0;
         private const double SPIKE_20FPS_MS = 1000.0 / 20.0;
 
-        private readonly MetricsAggregator m_Metrics = new();
+        private readonly Func<ProfilerSettingsSnapshot> m_Settings = () => SettingsStore.Snapshot;
+        private readonly MetricsAggregator m_Metrics;
         private readonly MemorySampler m_Memory = new();
         private readonly ReportBuilder m_Builder = new();
-        private readonly IReportSink[] m_Sinks;
+        private readonly ReportDispatcher m_Dispatcher;
+        private readonly ReportScheduler m_Scheduler = new();
 
         // Frame timing — main thread only
-        private long m_LastFrameTicks;
-        private long m_LastReportTicks;
-        private float m_ReportTimer;
         private int m_ReportCount;
         private bool m_HarmonyScanned;
         private bool m_ReplacementsLogged;
@@ -46,9 +44,9 @@ namespace VanillaProfiler
         // Defensive stale-reference guard for callbacks after OnDispose.
         private volatile bool m_Disposed;
 
-        public OverlaySnapshot LastSnapshot { get; private set; }
-        public HealthReport LastHealth { get; private set; }
-        public MemoryHistory MemoryHistory { get; } = new();
+        public OverlaySnapshot? LastSnapshot { get; private set; }
+        public HealthReport? LastHealth { get; private set; }
+        public MemoryHistory MemoryHistory { get; }
         public FpsSparkline FpsSparkline { get; } = new();
 
         public ProfilerLifecycleState LifecycleState => m_LifecycleState;
@@ -56,20 +54,23 @@ namespace VanillaProfiler
             || m_LifecycleState == ProfilerLifecycleState.Active;
         public bool IsLoading => m_LifecycleState == ProfilerLifecycleState.LoadingCity;
         public bool IsSettling => m_LifecycleState == ProfilerLifecycleState.Settling;
+        public bool ShouldProfileVanillaSystems => m_Settings().Settings.ProfileVanillaSystems;
 
-        private float ReportInterval => SettingsStore.Current.ReportIntervalSec;
+        private float ReportInterval => m_Settings().Settings.ReportIntervalSec;
 
         public Profiler(IReportSink[] sinks)
         {
-            m_Sinks = sinks ?? Array.Empty<IReportSink>();
-            m_LastReportTicks = Stopwatch.GetTimestamp();
-            foreach (var sink in m_Sinks) sink.Initialize();
+            m_Metrics = new MetricsAggregator(m_Settings);
+            MemoryHistory = new MemoryHistory(m_Settings);
+            m_Dispatcher = new ReportDispatcher(sinks);
+            m_Scheduler.Reset();
+            m_Dispatcher.Initialize();
         }
 
         public void Dispose()
         {
             m_Disposed = true;
-            foreach (var sink in m_Sinks) sink.Shutdown();
+            m_Dispatcher.Shutdown();
             ResetSessionState();
             m_Memory.Dispose();
         }
@@ -120,7 +121,7 @@ namespace VanillaProfiler
         }
 
         /// <summary>Main thread (SystemBase.Update Harmony Postfix).</summary>
-        public void RecordSystem(string name, long ticks, bool isVanilla, string modName = null)
+        public void RecordSystem(string name, long ticks, bool isVanilla, string? modName = null)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordSystem));
             if (m_Disposed) return;
@@ -156,32 +157,16 @@ namespace VanillaProfiler
             if (m_Disposed) return;
 
             long now = Stopwatch.GetTimestamp();
-            if (m_LastFrameTicks == 0)
-            {
-                m_LastFrameTicks = now;
-                m_LastReportTicks = now;
+            if (!m_Scheduler.TryAdvanceFrame(now, ReportInterval, out var timing, out bool reportDue))
                 return;
-            }
 
-            long delta = now - m_LastFrameTicks;
-            m_LastFrameTicks = now;
-
-            double frameMs = delta * MS_PER_SECOND / Stopwatch.Frequency;
-            float frameSec = (float)(delta * 1.0 / Stopwatch.Frequency);
-
-            m_Metrics.RecordFrame(delta, frameMs, SPIKE_30FPS_MS, SPIKE_20FPS_MS);
-            FpsSparkline.OnFrame(frameMs, frameSec);
+            m_Metrics.RecordFrame(timing.DeltaTicks, timing.FrameMs, SPIKE_30FPS_MS, SPIKE_20FPS_MS);
+            FpsSparkline.OnFrame(timing.FrameMs, timing.FrameSec);
             if (IsGameLoaded)
-                SpikeScreenshot.OnFrame(frameMs);
+                SpikeScreenshot.OnFrame(timing.FrameMs, m_Settings());
 
-            float reportInterval = ReportInterval;
-            if (reportInterval <= 0f) reportInterval = 5f;
-            m_ReportTimer += frameSec;
-            if (m_ReportTimer >= reportInterval)
-            {
-                m_ReportTimer %= reportInterval;
+            if (reportDue)
                 Report(now);
-            }
         }
 
         // ---------- Report orchestration ----------
@@ -191,7 +176,7 @@ namespace VanillaProfiler
             MainThreadGuard.AssertMainThread(nameof(ForceReport));
             if (m_Disposed) return;
             Report(Stopwatch.GetTimestamp());
-            m_ReportTimer = 0f;
+            m_Scheduler.ResetReportTimer();
         }
 
         private void Report(long nowTicks)
@@ -199,11 +184,7 @@ namespace VanillaProfiler
             MainThreadGuard.AssertMainThread(nameof(Report));
             if (m_Disposed) return;
 
-#pragma warning disable CIVIC021 // Stopwatch.Frequency is a hardware constant, always >= 1
-            float elapsedSec = (float)((nowTicks - m_LastReportTicks) / (double)Stopwatch.Frequency);
-#pragma warning restore CIVIC021
-            m_LastReportTicks = nowTicks;
-            if (elapsedSec <= 0.001f) elapsedSec = ReportInterval;
+            float elapsedSec = m_Scheduler.ConsumeElapsedSeconds(nowTicks, ReportInterval);
 
             if (!IsGameLoaded)
             {
@@ -234,36 +215,33 @@ namespace VanillaProfiler
                 MemoryHistory.Record(memory.ManagedBytes, elapsedSec);
 
                 var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
-
-                // Replaced-systems scan walks World.All, so it only makes sense
-                // once a city is live (IsGameLoaded gate above already enforces
-                // that). Run every cycle — mods may toggle Enabled at runtime
-                // (mod-options screens flip vanilla systems on the fly), so a
-                // one-shot scan would freeze stale data into the overlay.
-                var replacements = SystemReplacementDetector.Scan();
-                snapshot.ReplacedVanillaSystems = ToTuples(replacements, metrics.PatchedVanillaSystems);
-                if (!m_ReplacementsLogged)
-                {
-                    m_ReplacementsLogged = true;
-                    SystemReplacementDetector.LogTo(this, replacements);
-                }
-
-                LastSnapshot = snapshot;
-                LastHealth = health;
-                m_LifecycleState = ProfilerLifecycleState.Active;
-
-                // Per-sink isolation: a misbehaving sink (e.g. disk full, AV scan locking
-                // the file) must not abort delivery to the others. We log the first failure
-                // and keep going; sink internals are expected to handle their own retries.
-                foreach (var sink in m_Sinks)
-                {
-                    try { sink.WriteReport(m_ReportCount, snapshot, health, metrics, memory); }
-                    catch (Exception ex)
-                    {
-                        VanillaProfilerMod.Log?.Warn($"Sink {sink?.GetType().Name} WriteReport failed: {ex}");
-                    }
-                }
+                AttachReplacementSnapshot(snapshot, metrics);
+                PublishSnapshot(snapshot, health);
+                WriteReports(metrics, memory, snapshot, health);
             }
+        }
+
+        private void AttachReplacementSnapshot(OverlaySnapshot snapshot, MetricsSample metrics)
+        {
+            // Run every cycle; mods may toggle Harmony patches at runtime.
+            var replacements = SystemReplacementDetector.Scan();
+            snapshot.ReplacedVanillaSystems = ToTuples(replacements, metrics.PatchedVanillaSystems);
+            if (m_ReplacementsLogged) return;
+            m_ReplacementsLogged = true;
+            SystemReplacementDetector.LogTo(this, replacements);
+        }
+
+        private void PublishSnapshot(OverlaySnapshot snapshot, HealthReport health)
+        {
+            LastSnapshot = snapshot;
+            LastHealth = health;
+            m_LifecycleState = ProfilerLifecycleState.Active;
+        }
+
+        private void WriteReports(
+            MetricsSample metrics, MemorySample memory, OverlaySnapshot snapshot, HealthReport health)
+        {
+            m_Dispatcher.WriteReport(m_ReportCount, snapshot, health, metrics, memory);
         }
 
         /// <summary>Info-level system message routed to all sinks. Main thread.</summary>
@@ -278,22 +256,12 @@ namespace VanillaProfiler
         private void WriteSystem(SystemLogLevel level, string msg)
         {
             if (m_Disposed) return;
-            foreach (var sink in m_Sinks)
-            {
-                try
-                {
-                    sink.WriteSystemMessage(level, msg);
-                }
-                catch (Exception ex)
-                {
-                    VanillaProfilerMod.Log?.Warn($"VanillaProfiler sink system-write failed: {ex}");
-                }
-            }
+            m_Dispatcher.WriteSystem(level, msg);
         }
 
         private static (string, string, double)[] ToTuples(
-            System.Collections.Generic.List<SystemReplacementDetector.Replacement> list,
-            System.Collections.Generic.Dictionary<string, Aggregation.PhaseData> patchedMs)
+            System.Collections.Generic.IReadOnlyList<SystemReplacementDetector.Replacement>? list,
+            System.Collections.Generic.IReadOnlyDictionary<string, Aggregation.PhaseData>? patchedMs)
         {
             if (list == null || list.Count == 0) return Array.Empty<(string, string, double)>();
             var arr = new (string, string, double)[list.Count];
@@ -317,9 +285,7 @@ namespace VanillaProfiler
             SpikeScreenshot.Reset();
             m_HarmonyScanned = false;
             m_ReplacementsLogged = false;
-            m_LastFrameTicks = 0;
-            m_LastReportTicks = Stopwatch.GetTimestamp();
-            m_ReportTimer = 0f;
+            m_Scheduler.Reset();
             // Snapshot belongs to the previous session — drop it. Overlay reads
             // IsSettling to decide what to render in this gap (explicit settling
             // banner) instead of either a blank panel or numbers from a save the

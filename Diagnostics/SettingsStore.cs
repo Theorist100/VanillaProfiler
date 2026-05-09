@@ -19,6 +19,9 @@ namespace VanillaProfiler.Diagnostics
         private const long MAX_SETTINGS_BYTES = 256 * 1024;
 
         public static ProfilerSettings Current { get; private set; } = new();
+        private static ProfilerSettingsSnapshot s_Snapshot = ProfilerSettingsSnapshot.From(Current);
+
+        public static ProfilerSettingsSnapshot Snapshot => s_Snapshot;
 
         public static string FilePath =>
             Path.Combine(Application.persistentDataPath, SETTINGS_DIR, SETTINGS_FILE);
@@ -39,6 +42,7 @@ namespace VanillaProfiler.Diagnostics
                     return;
                 }
                 Current = new ProfilerSettings();
+                RefreshSnapshot();
                 SaveCore();
                 return;
             }
@@ -56,6 +60,7 @@ namespace VanillaProfiler.Diagnostics
 
             ModLog.Warn("Settings load failed and no usable backup found — resetting to defaults");
             Current = new ProfilerSettings();
+            RefreshSnapshot();
             SaveCore();
         }
 
@@ -63,14 +68,16 @@ namespace VanillaProfiler.Diagnostics
         {
             Current = settings ?? new ProfilerSettings();
             Current.Clamp();
+            RefreshSnapshot();
             if (save) SaveCore();
         }
 
-        public static void Mutate(Action<ProfilerSettings> mutate, bool save)
+        public static void Mutate(Action<ProfilerSettings>? mutate, bool save)
         {
-            if ((object)mutate == null) return;
+            if (mutate == null) return;
             mutate(Current);
             Current.Clamp();
+            RefreshSnapshot();
             if (save) SaveCore();
         }
 
@@ -100,8 +107,9 @@ namespace VanillaProfiler.Diagnostics
                 JsonUtility.FromJsonOverwrite(json, loaded);
                 bool migrated = loaded.Clamp();
                 Current = loaded;
+                RefreshSnapshot();
                 ModLog.Info($"Settings loaded from {label}: {path}");
-                if (migrated && label == "primary")
+                if (migrated && string.Equals(label, "primary", StringComparison.Ordinal))
                     Save();
                 return true;
             }
@@ -119,7 +127,8 @@ namespace VanillaProfiler.Diagnostics
             try
             {
                 Current.Clamp();
-                string dir = Path.GetDirectoryName(path);
+                RefreshSnapshot();
+                string? dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
@@ -136,6 +145,11 @@ namespace VanillaProfiler.Diagnostics
             {
                 ModLog.Warn($"Settings save failed: {ex}");
             }
+        }
+
+        private static void RefreshSnapshot()
+        {
+            s_Snapshot = ProfilerSettingsSnapshot.From(Current);
         }
 
     }

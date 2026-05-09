@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System;
 
 namespace VanillaProfiler.Diagnostics
 {
@@ -12,9 +14,8 @@ namespace VanillaProfiler.Diagnostics
         private const int LEAK_WINDOW = 5;        // last 5 reports
         private const double LEAK_THRESHOLD_MB_PER_SEC = 1.0;
         private const double BYTES_PER_MB = 1024.0 * 1024.0;
-        private static float ReportIntervalS => SettingsStore.Current.ReportIntervalSec;
-
         private readonly List<Sample> m_Samples = new(CAPACITY);
+        private readonly Func<ProfilerSettingsSnapshot> m_Settings;
         private int m_SuppressedReports;
         private double m_TotalSeconds;
 
@@ -23,6 +24,11 @@ namespace VanillaProfiler.Diagnostics
         public double GrowthMBperSec { get; private set; }
         public double TotalGrownMB { get; private set; }
         public int WindowSeconds { get; private set; }
+
+        public MemoryHistory(Func<ProfilerSettingsSnapshot> settings)
+        {
+            m_Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        }
 
         public void Record(long managedBytes, float elapsedSec)
         {
@@ -123,7 +129,7 @@ namespace VanillaProfiler.Diagnostics
             WindowSeconds = 0;
         }
 
-        private static double NormalizeElapsed(float elapsedSec, out bool clamped)
+        private double NormalizeElapsed(float elapsedSec, out bool clamped)
         {
             clamped = false;
             double fallback = ReportIntervalS;
@@ -142,6 +148,8 @@ namespace VanillaProfiler.Diagnostics
             return elapsedSec;
         }
 
+        private float ReportIntervalS => m_Settings().Settings.ReportIntervalSec;
+
         private static double Median(List<double> values)
         {
             if (values.Count == 0) return 0;
@@ -152,6 +160,7 @@ namespace VanillaProfiler.Diagnostics
                 : values[mid];
         }
 
+        [StructLayout(LayoutKind.Auto)]
         private readonly struct Sample
         {
             public readonly long Bytes;

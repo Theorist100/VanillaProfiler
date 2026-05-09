@@ -12,9 +12,9 @@ namespace VanillaProfiler.Overlay.Modes
     /// </summary>
     public sealed class RecommendationsMode : IOverlayMode
     {
-        private OverlaySnapshot m_CachedSnapshot;
-        private HealthReport m_CachedHealth;
-        private List<Recommendation> m_CachedPicks;
+        private OverlaySnapshot? m_CachedSnapshot;
+        private HealthReport? m_CachedHealth;
+        private IReadOnlyList<Recommendation>? m_CachedPicks;
 
         public string DisplayName => "Tips";
         public bool IsHidden => false;
@@ -32,7 +32,7 @@ namespace VanillaProfiler.Overlay.Modes
         // gets the snapshot. Health is recomputed each report cycle and exposed via
         // ProfilerHost; reading it here keeps the height in sync with what Draw uses.
         private static HealthReport LastHealth()
-            => ProfilerHost.TryGet()?.LastHealth;
+            => ProfilerHost.TryGet()?.LastHealth ?? new HealthReport();
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {
@@ -54,7 +54,7 @@ namespace VanillaProfiler.Overlay.Modes
             }
         }
 
-        private List<Recommendation> Picks(OverlaySnapshot snapshot, HealthReport health)
+        private IReadOnlyList<Recommendation> Picks(OverlaySnapshot snapshot, HealthReport health)
         {
             if (m_CachedPicks != null
                 && ReferenceEquals(m_CachedSnapshot, snapshot)

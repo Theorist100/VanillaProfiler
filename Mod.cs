@@ -22,11 +22,11 @@ namespace VanillaProfiler
     {
         internal const string HARMONY_ID = "com.vanillaprofiler";
 
-        public static ILog Log { get; private set; }
+        public static ILog? Log { get; private set; }
 
-        private Harmony m_Harmony;
-        private Profiler m_Profiler;
-        private UnityEngine.GameObject m_OverlayObject;
+        private Harmony? m_Harmony;
+        private Profiler? m_Profiler;
+        private UnityEngine.GameObject? m_OverlayObject;
 
         public void OnLoad(UpdateSystem updateSystem)
         {
@@ -40,48 +40,14 @@ namespace VanillaProfiler
 
                 var logDir = LogFileSink.GetLogDirectory(UnityEngine.Application.persistentDataPath);
 
-                m_Profiler = new Profiler(new IReportSink[] { new LogFileSink(logDir) });
-                ProfilerHost.Register(m_Profiler);
-                ModLog.Flush();  // replay buffered early-init messages before later live diagnostics
-
-                // Enumerate every ProfilerRecorder marker the build exposes. Diagnostic
-                // only — confirms MemorySampler's hardcoded counter names are still valid.
-                // Runs after Register so output lands in VanillaProfiler.log via ModLog.
-                MarkerEnumerator.LogAvailable();
-                // Wipe stale city counts when the player returns to the main menu so the
-                // overlay/exporter doesn't display data from the previous save.
-                GameManager.instance.onGameLoadingComplete += OnGameLoadingComplete;
-                // Hide overlay/badges during city loading only. MainMenu preloads are
-                // treated as no-city state so loading cannot get stuck if the app exits
-                // before a matching completion callback.
-                GameManager.instance.onGamePreload += OnGamePreload;
+                RegisterProfiler(logDir);
+                RegisterGameLifecycleCallbacks();
                 ModLog.Info($"Log directory: {logDir}");
                 ModAttribution.PrewarmLoadedAssemblies();
 
-                // Register tick counter in SimulationSystemGroup
-                updateSystem.UpdateAt<SimTickCounterSystem>(SystemUpdatePhase.GameSimulation);
-                updateSystem.UpdateAt<CityContextSystem>(SystemUpdatePhase.GameSimulation);
-
-                // Apply Harmony patches (UpdateSystem.Update measurement)
-                m_Harmony = new Harmony(HARMONY_ID);
-                bool phasePatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
-                    new[] { typeof(SystemUpdatePhase) }) != null;
-                bool indexedPatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
-                    new[] { typeof(SystemUpdatePhase), typeof(uint), typeof(int) }) != null;
-
-                ModLog.Info($"Hook check: Update(SystemUpdatePhase) = {(phasePatchAvailable ? "OK" : "MISSING")}");
-                ModLog.Info($"Hook check: Update(SystemUpdatePhase,uint,int) = {(indexedPatchAvailable ? "OK" : "MISSING")}");
-
-                m_Harmony.PatchAll(typeof(VanillaProfilerMod).Assembly);
-
-                int patchCount = m_Harmony.GetPatchedMethods()
-                    .Count(method => Harmony.GetPatchInfo(method)?.Owners?.Contains(HARMONY_ID) == true);
-                ModLog.Info($"Harmony patches applied: {patchCount}");
-
-                // Create persistent overlay GameObject
-                m_OverlayObject = new UnityEngine.GameObject("VanillaProfilerOverlay");
-                UnityEngine.Object.DontDestroyOnLoad(m_OverlayObject);
-                m_OverlayObject.AddComponent<ProfilerOverlay>();
+                RegisterSimulationSystems(updateSystem);
+                ApplyHarmonyPatches();
+                CreateOverlay();
 
                 ModLog.Info("VanillaProfiler ready.");
             }
@@ -96,6 +62,55 @@ namespace VanillaProfiler
         public void OnDispose()
         {
             Cleanup(logDispose: true);
+        }
+
+        private void RegisterProfiler(string logDir)
+        {
+            m_Profiler = new Profiler(new IReportSink[] { new LogFileSink(logDir) });
+            ProfilerHost.Register(m_Profiler);
+            ModLog.Flush();  // replay buffered early-init messages before later live diagnostics
+
+            // Diagnostic only; confirms MemorySampler's hardcoded counter names are still valid.
+            MarkerEnumerator.LogAvailable();
+        }
+
+        private static void RegisterGameLifecycleCallbacks()
+        {
+            // Wipe stale city counts when the player returns to the main menu.
+            GameManager.instance.onGameLoadingComplete += OnGameLoadingComplete;
+            // Hide overlay/badges during city loading only.
+            GameManager.instance.onGamePreload += OnGamePreload;
+        }
+
+        private static void RegisterSimulationSystems(UpdateSystem updateSystem)
+        {
+            updateSystem.UpdateAt<SimTickCounterSystem>(SystemUpdatePhase.GameSimulation);
+            updateSystem.UpdateAt<CityContextSystem>(SystemUpdatePhase.GameSimulation);
+        }
+
+        private void ApplyHarmonyPatches()
+        {
+            m_Harmony = new Harmony(HARMONY_ID);
+            bool phasePatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
+                new[] { typeof(SystemUpdatePhase) }) != null;
+            bool indexedPatchAvailable = AccessTools.Method(typeof(UpdateSystem), "Update",
+                new[] { typeof(SystemUpdatePhase), typeof(uint), typeof(int) }) != null;
+
+            ModLog.Info($"Hook check: Update(SystemUpdatePhase) = {(phasePatchAvailable ? "OK" : "MISSING")}");
+            ModLog.Info($"Hook check: Update(SystemUpdatePhase,uint,int) = {(indexedPatchAvailable ? "OK" : "MISSING")}");
+
+            m_Harmony.PatchAll(typeof(VanillaProfilerMod).Assembly);
+
+            int patchCount = m_Harmony.GetPatchedMethods()
+                .Count(method => Harmony.GetPatchInfo(method)?.Owners?.Contains(HARMONY_ID) == true);
+            ModLog.Info($"Harmony patches applied: {patchCount}");
+        }
+
+        private void CreateOverlay()
+        {
+            m_OverlayObject = new UnityEngine.GameObject("VanillaProfilerOverlay");
+            UnityEngine.Object.DontDestroyOnLoad(m_OverlayObject);
+            m_OverlayObject.AddComponent<ProfilerOverlay>();
         }
 
         private static void OnGameLoadingComplete(Purpose purpose, GameMode mode)
@@ -140,7 +155,7 @@ namespace VanillaProfiler
             m_Harmony = null;
         }
 
-        private static void TryCleanup(string step, Action action)
+        private static void TryCleanup(string step, Action? action)
         {
             try { action?.Invoke(); }
             catch (Exception ex) { Log?.Warn($"VanillaProfiler cleanup failed ({step}): {ex}"); }

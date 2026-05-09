@@ -23,9 +23,9 @@ namespace VanillaProfiler
     {
         private sealed class SystemInfo
         {
-            public string Name;
+            public string Name = string.Empty;
             public bool IsVanilla;
-            public string ModName;
+            public string ModName = string.Empty;
         }
 
         // Per-call state carried via Harmony __state. Must survive nested SystemBase.Update
@@ -74,7 +74,7 @@ namespace VanillaProfiler
         }
 
         [HarmonyFinalizer]
-        public static Exception Finalizer(SystemBase __instance, UpdateState __state, Exception __exception)
+        public static Exception? Finalizer(SystemBase __instance, UpdateState __state, Exception? __exception)
         {
             if (__exception != null)
                 Complete(__instance, __state);
@@ -105,7 +105,7 @@ namespace VanillaProfiler
                 // SystemInfo) because mod-options screens can flip Harmony
                 // patches at runtime; SystemReplacementDetector rebuilds the
                 // set once per report cycle.
-                var profiler = ProfilerHost.TryGet();
+                var profiler = ProfilerHost.TryGetHotPath();
                 if (profiler == null) return;
 
                 if (info.IsVanilla)
@@ -115,7 +115,7 @@ namespace VanillaProfiler
                         profiler.RecordPatchedVanilla(info.Name, elapsed);
                         return;
                     }
-                    if (!SettingsStore.Current.ProfileVanillaSystems) return;
+                    if (!profiler.ShouldProfileVanillaSystems) return;
                 }
 
                 profiler.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
@@ -136,7 +136,7 @@ namespace VanillaProfiler
             return new SystemInfo
             {
                 Name = name,
-                IsVanilla = modName == ModAttribution.VANILLA,
+                IsVanilla = string.Equals(modName, ModAttribution.VANILLA, StringComparison.Ordinal),
                 ModName = modName,
             };
         }

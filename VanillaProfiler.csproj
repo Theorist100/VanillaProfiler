@@ -9,10 +9,10 @@
         <Description>Lightweight in-game profiler for diagnosing FPS drops, stutters, and mod conflicts.</Description>
         <Authors>Beltorn</Authors>
         <TreatWarningsAsErrors>False</TreatWarningsAsErrors>
-        <Nullable>disable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
         <!--
             Microsoft NetAnalyzer suppressions with rationale:
-              CS8632 — nullable reference annotations are off project-wide
               CA1001 — IMod lifecycle is owned by the game; OnDispose disposes m_Profiler
               CA1002 — generic List<T> in public API is the intended profiler/exporter shape
               CA1031 — broad catch in Harmony patches is the documented contract (never crash)
@@ -25,7 +25,7 @@
               CA1822 — instance methods kept on Profiler/Overlay for symmetry; static-marking churn
               CA1859 — IEnumerable return on TailPerfLog keeps the caller from materialising the array
         -->
-        <NoWarn>$(NoWarn);CS8632;CA1001;CA1002;CA1031;CA1034;CA1051;CA1062;CA1305;CA1707;CA1805;CA1822;CA1859;CIVIC003;CIVIC052;CIVIC076;CIVIC101;CIVIC142;CIVIC201;CIVIC207;CIVIC220;CIVIC226</NoWarn>
+        <NoWarn>$(NoWarn);CA1001;CA1002;CA1031;CA1034;CA1051;CA1062;CA1305;CA1707;CA1805;CA1822;CA1859;CIVIC003;CIVIC052;CIVIC076;CIVIC101;CIVIC142;CIVIC201;CIVIC207;CIVIC220;CIVIC226</NoWarn>
         <!--
             CIVIC analyzer suppressions with rationale:
               CIVIC003 — DateTime.Now/UtcNow are intentional for the real-time profiler log
@@ -34,8 +34,8 @@
                          contract: "profiler — never crash game" (mirrors CA1031 above).
               CIVIC076 — CityContextSystem must tick even with empty queries to call Reset()
                          on city unload; RequireForUpdate would skip that branch.
-              CIVIC101 — CivicSurvival-specific RegisterAt<T> pattern; VanillaProfiler hooks
-                         into CS2 update system via Mod.OnLoad → UpdateSystem.UpdateAt instead.
+              CIVIC101 — analyzer expects a RegisterAt<T> pattern that does not apply here;
+                         VanillaProfiler hooks into CS2 via Mod.OnLoad → UpdateSystem.UpdateAt instead.
               CIVIC142 — Coherent UI binding-names.json applies to UI-bridged mods; VanillaProfiler
                          is IMGUI-only and has no TS/React layer.
               CIVIC201 — IMGUI layout dimensions, log column widths, and font sizes are inline
@@ -88,6 +88,8 @@
     <ItemGroup>
         <Reference Update="System"><Private>false</Private></Reference>
         <Reference Update="System.Core"><Private>false</Private></Reference>
+        <Reference Include="System.IO.Compression"><Private>false</Private></Reference>
+        <Reference Include="System.IO.Compression.FileSystem"><Private>false</Private></Reference>
     </ItemGroup>
 
     <!-- CS2 Modding Toolchain targets -->

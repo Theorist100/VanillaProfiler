@@ -29,14 +29,14 @@ namespace VanillaProfiler.Diagnostics
     /// </summary>
     public static class GraphicsSettingsProbe
     {
-        private static GraphicsSettingsState s_State;
+        private static GraphicsSettingsState? s_State;
 
         public static GraphicsSettingsState State
         {
             get
             {
                 EnsureProbed();
-                return s_State;
+                return s_State!;
             }
         }
 
@@ -64,7 +64,7 @@ namespace VanillaProfiler.Diagnostics
 
         private static void ProbeAll(GraphicsSettingsState state)
         {
-            object graphics = TryGetGraphicsSettings();
+            object? graphics = TryGetGraphicsSettings();
             if (graphics == null)
             {
                 ModLog.Warn("Graphics probe: SharedSettings.instance.graphics not available");
@@ -84,7 +84,7 @@ namespace VanillaProfiler.Diagnostics
 
         // SharedSettings.instance is a static getter that returns
         // GameManager.instance?.settings — null before the game is ready.
-        private static object TryGetGraphicsSettings()
+        private static object? TryGetGraphicsSettings()
         {
             try
             {
@@ -114,7 +114,7 @@ namespace VanillaProfiler.Diagnostics
                 if (value == null) return;
                 // CS2's DisplayMode enum has Fullscreen / Windowed / FullScreenWindow.
                 // Match by string so we don't have to import the enum type at compile time.
-                state.IsFullscreenWindowed = value.ToString() == "FullScreenWindow";
+                state.IsFullscreenWindowed = string.Equals(value.ToString(), "FullScreenWindow", StringComparison.Ordinal);
             }
             catch (Exception ex) { ModLog.Warn($"DisplayMode probe failed: {ex.Message}"); }
         }
@@ -127,7 +127,7 @@ namespace VanillaProfiler.Diagnostics
                 var value = prop?.GetValue(graphics);
                 if (value == null) return;
                 // DepthOfFieldMode.Off means it's disabled — anything else is on.
-                state.DepthOfFieldEnabled = value.ToString() != "Off";
+                state.DepthOfFieldEnabled = !string.Equals(value.ToString(), "Off", StringComparison.Ordinal);
             }
             catch (Exception ex) { ModLog.Warn($"DepthOfField probe failed: {ex.Message}"); }
         }
@@ -185,7 +185,7 @@ namespace VanillaProfiler.Diagnostics
         // GraphicsSettings inherits this from GlobalQualitySettings, so we walk the
         // hierarchy ourselves — AccessTools.FirstMethod uses BindingFlags.DeclaredOnly
         // and would miss inherited generic methods.
-        private static object InvokeGetQualitySetting(object graphics, Type graphicsType, Type qsType)
+        private static object? InvokeGetQualitySetting(object graphics, Type graphicsType, Type qsType)
         {
             var generic = FindGenericGetQualitySetting(graphicsType);
             if (generic == null) return null;
@@ -193,7 +193,7 @@ namespace VanillaProfiler.Diagnostics
             return closed.Invoke(graphics, null);
         }
 
-        private static System.Reflection.MethodInfo FindGenericGetQualitySetting(Type type)
+        private static System.Reflection.MethodInfo? FindGenericGetQualitySetting(Type type)
         {
             for (var t = type; t != null; t = t.BaseType)
             {
@@ -204,7 +204,7 @@ namespace VanillaProfiler.Diagnostics
                     System.Reflection.BindingFlags.DeclaredOnly);
                 foreach (var m in methods)
                 {
-                    if (m.Name != "GetQualitySetting") continue;
+                    if (!string.Equals(m.Name, "GetQualitySetting", StringComparison.Ordinal)) continue;
                     if (!m.IsGenericMethodDefinition) continue;
                     if (m.GetParameters().Length != 0) continue;
                     return m;

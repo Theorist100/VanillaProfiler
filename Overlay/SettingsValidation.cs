@@ -13,7 +13,7 @@ namespace VanillaProfiler.Overlay
     {
         public static bool TryFloatInRange(
             string text, float min, float max, string fieldName,
-            out float value, out string error)
+            out float value, out string? error)
         {
             if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
                 || float.IsNaN(value) || float.IsInfinity(value))
@@ -32,7 +32,7 @@ namespace VanillaProfiler.Overlay
 
         public static bool TryIntInRange(
             string text, int min, int max, string fieldName,
-            out int value, out string error)
+            out int value, out string? error)
         {
             if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
             {

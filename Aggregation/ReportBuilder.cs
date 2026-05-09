@@ -48,7 +48,7 @@ namespace VanillaProfiler.Aggregation
 
             (double profilerMs, double profilerPct) = ComputeProfilerSelfCost(m, avgFrameMs);
 
-            return new OverlaySnapshot
+            var snapshot = new OverlaySnapshot
             {
                 AvgFps = avgFps,
                 WindowSeconds = m.ElapsedSec,
@@ -66,24 +66,57 @@ namespace VanillaProfiler.Aggregation
                 ManagedDeltaMB = mem.ManagedDelta / BYTES_PER_MB,
                 ProfilerSelfMs = profilerMs,
                 ProfilerSelfPercent = profilerPct,
-                GfxUsedMB = mem.GfxUsedBytes / BYTES_PER_MB,
-                AudioUsedMB = mem.AudioUsedBytes / BYTES_PER_MB,
-                MainThreadCpuMs = mem.MainThreadCpuNs / 1_000_000.0,
-                RenderThreadCpuMs = mem.RenderThreadCpuNs / 1_000_000.0,
-                GpuFrameTimeMs = mem.GpuFrameTimeNs / 1_000_000.0,
-                PresentWaitMs = mem.PresentWaitNs / 1_000_000.0,
-                DrawCalls = mem.DrawCallsCount,
-                SetPassCalls = mem.SetPassCallsCount,
-                Triangles = mem.TrianglesCount,
-                Vertices = mem.VerticesCount,
-                ShadowCasters = mem.ShadowCastersCount,
-                UsedBuffersMB = mem.UsedBuffersBytes / BYTES_PER_MB,
-                UsedBuffersCount = mem.UsedBuffersCount,
-                RenderTexturesMB = mem.RenderTexturesBytes / BYTES_PER_MB,
-                GcCollectStallMs = mem.GcCollectTotalNs / 1_000_000.0,
-                GcCollectCount = mem.GcCollectCount,
-                AppResidentMB = mem.AppResidentBytes / BYTES_PER_MB,
             };
+            FillEngineCounters(snapshot, mem);
+            return snapshot;
+        }
+
+        private static void FillEngineCounters(OverlaySnapshot snapshot, MemorySample mem)
+        {
+            snapshot.GfxUsedMB = mem.GfxUsedBytes / BYTES_PER_MB;
+            snapshot.AudioUsedMB = mem.AudioUsedBytes / BYTES_PER_MB;
+            snapshot.MainThreadCpuMs = mem.MainThreadCpuNs / 1_000_000.0;
+            snapshot.RenderThreadCpuMs = mem.RenderThreadCpuNs / 1_000_000.0;
+            snapshot.GpuFrameTimeMs = mem.GpuFrameTimeNs / 1_000_000.0;
+            snapshot.PresentWaitMs = mem.PresentWaitNs / 1_000_000.0;
+            snapshot.GfxUsedAvailable = mem.GfxUsedAvailable;
+            snapshot.AudioUsedAvailable = mem.AudioUsedAvailable;
+            snapshot.MainThreadCpuAvailable = mem.MainThreadCpuAvailable;
+            snapshot.RenderThreadCpuAvailable = mem.RenderThreadCpuAvailable;
+            snapshot.GpuFrameTimeAvailable = mem.GpuFrameTimeAvailable;
+            snapshot.PresentWaitAvailable = mem.PresentWaitAvailable;
+            FillRenderCounters(snapshot, mem);
+        }
+
+        private static void FillRenderCounters(OverlaySnapshot snapshot, MemorySample mem)
+        {
+            snapshot.DrawCalls = mem.DrawCallsCount;
+            snapshot.SetPassCalls = mem.SetPassCallsCount;
+            snapshot.Triangles = mem.TrianglesCount;
+            snapshot.Vertices = mem.VerticesCount;
+            snapshot.ShadowCasters = mem.ShadowCastersCount;
+            snapshot.DrawCallsAvailable = mem.DrawCallsAvailable;
+            snapshot.SetPassCallsAvailable = mem.SetPassCallsAvailable;
+            snapshot.TrianglesAvailable = mem.TrianglesAvailable;
+            snapshot.VerticesAvailable = mem.VerticesAvailable;
+            snapshot.ShadowCastersAvailable = mem.ShadowCastersAvailable;
+            FillMemoryCounters(snapshot, mem);
+        }
+
+        private static void FillMemoryCounters(OverlaySnapshot snapshot, MemorySample mem)
+        {
+            snapshot.UsedBuffersMB = mem.UsedBuffersBytes / BYTES_PER_MB;
+            snapshot.UsedBuffersCount = mem.UsedBuffersCount;
+            snapshot.RenderTexturesMB = mem.RenderTexturesBytes / BYTES_PER_MB;
+            snapshot.UsedBuffersBytesAvailable = mem.UsedBuffersBytesAvailable;
+            snapshot.UsedBuffersCountAvailable = mem.UsedBuffersCountAvailable;
+            snapshot.RenderTexturesBytesAvailable = mem.RenderTexturesBytesAvailable;
+            snapshot.GcCollectStallMs = mem.GcCollectTotalNs / 1_000_000.0;
+            snapshot.GcCollectCount = mem.GcCollectCount;
+            snapshot.GcCollectAvailable = mem.GcCollectAvailable;
+            snapshot.AppResidentMB = mem.AppResidentBytes / BYTES_PER_MB;
+            snapshot.SystemUsedAvailable = mem.SystemUsedAvailable;
+            snapshot.AppResidentAvailable = mem.AppResidentAvailable;
         }
 
         private const string PROFILER_MOD_NAME = "VanillaProfiler";
@@ -98,7 +131,7 @@ namespace VanillaProfiler.Aggregation
             return (perFrameMs, pct);
         }
 
-        private (string, double)[] BuildTop(Dictionary<string, PhaseData> systems, int n)
+        private (string, double)[] BuildTop(IReadOnlyDictionary<string, PhaseData> systems, int n)
         {
             m_SortBuffer.Clear();
             foreach (var kvp in systems) m_SortBuffer.Add(kvp);
@@ -127,7 +160,7 @@ namespace VanillaProfiler.Aggregation
             return result;
         }
 
-        private static double PhaseMs(Dictionary<string, PhaseData> phases, string phaseKey, int frameCount)
+        private static double PhaseMs(IReadOnlyDictionary<string, PhaseData> phases, string phaseKey, int frameCount)
         {
             if (frameCount <= 0) return 0;
             return phases.TryGetValue(phaseKey, out var data)

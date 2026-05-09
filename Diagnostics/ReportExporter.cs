@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO.Compression;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -9,14 +10,15 @@ namespace VanillaProfiler.Diagnostics
 {
     /// <summary>
     /// One-shot diagnostic report writer for players to attach to bug reports.
-    /// Triggered by Ctrl+F11 in the overlay. Output: persistentDataPath/Reports/CSII_Report_yyyyMMdd_HHmmss_fff.txt.
+    /// Triggered by Ctrl+F11 in the overlay. Output: persistentDataPath/Reports/CSII_Report_yyyyMMdd_HHmmss_fff.txt
+    /// plus a best-effort .zip support bundle.
     /// </summary>
     public static class ReportExporter
     {
         private const int LOG_TAIL_LINES = 50;
 
         /// <returns>Full path of the saved report, or null on failure.</returns>
-        public static string Export()
+        public static string? Export()
         {
             try
             {
@@ -26,8 +28,10 @@ namespace VanillaProfiler.Diagnostics
                 string fileName = $"CSII_Report_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt";
                 string path = Path.Combine(dir, fileName);
 
-                AtomicFileWriter.WriteAllText(path, BuildReport(), Encoding.UTF8);
+                string report = BuildReport();
+                AtomicFileWriter.WriteAllText(path, report, Encoding.UTF8);
                 ModLog.Info($"Performance report saved: {path}");
+                TryWriteSupportBundle(path, report);
                 return path;
             }
             catch (Exception ex)
@@ -59,6 +63,24 @@ namespace VanillaProfiler.Diagnostics
             sb.AppendLine("  Frame time, GPU/CPU thread time and memory metrics are accurate.");
             sb.AppendLine();
 
+            AppendSystemInfo(sb);
+            AppendLoadedMods(sb);
+            AppendSnapshot(sb, snap);
+            AppendCounterAvailability(sb, snap);
+            AppendCityContext(sb);
+            AppendHealth(sb, health);
+            AppendRecommendations(sb, snap, health);
+            AppendTopTables(sb, snap);
+
+            sb.AppendLine($"--- Last {LOG_TAIL_LINES} lines of VanillaProfiler.log ---");
+            foreach (var line in TailPerfLog(LOG_TAIL_LINES))
+                sb.AppendLine(line);
+
+            return sb.ToString();
+        }
+
+        private static void AppendSystemInfo(StringBuilder sb)
+        {
             sb.AppendLine("--- System Info ---");
             sb.AppendLine($"OS:               {SystemInfo.operatingSystem}");
             sb.AppendLine(Inv($"CPU:              {SystemInfo.processorType} ({SystemInfo.processorCount} cores, {SystemInfo.processorFrequency} MHz)"));
@@ -67,7 +89,10 @@ namespace VanillaProfiler.Diagnostics
             sb.AppendLine(Inv($"RAM:              {SystemInfo.systemMemorySize} MB"));
             sb.AppendLine(Inv($"Screen:           {Screen.width}x{Screen.height} @ {Screen.currentResolution.refreshRateRatio.value:F1} Hz"));
             sb.AppendLine();
+        }
 
+        private static void AppendLoadedMods(StringBuilder sb)
+        {
             sb.AppendLine("--- Loaded Mods ---");
             var mods = ModAttribution.GetLoadedMods();
             if (mods.Count == 0)
@@ -76,81 +101,78 @@ namespace VanillaProfiler.Diagnostics
                 foreach (var name in mods)
                     sb.AppendLine($"  {name}");
             sb.AppendLine();
+        }
 
+        private static void AppendSnapshot(StringBuilder sb, OverlaySnapshot? snap)
+        {
             sb.AppendLine($"--- Current Snapshot ({WindowLabel(snap)}) ---");
             if (snap == null)
             {
                 sb.AppendLine("  No data collected yet — start a save first.");
+                sb.AppendLine();
+                return;
             }
-            else
+
+            sb.AppendLine(Inv($"FPS:              {snap.AvgFps:F1} avg / {snap.MinFps:F1} min"));
+            sb.AppendLine(Inv($"Frame:            {snap.AvgFrameMs:F2} ms avg / {snap.MaxFrameMs:F2} ms max"));
+            sb.AppendLine(Inv($"Sim:              {snap.SimTicksPerSec:F0} ticks/s"));
+            sb.AppendLine(Inv($"Spikes:           {snap.Spikes30fps} below 30 fps, {snap.Spikes20fps} below 20 fps"));
+            sb.AppendLine(Inv($"Managed growth:   {snap.ManagedGrowthMBperSec:+0.00;-0.00} MB/s"));
+            sb.AppendLine(Inv($"Managed memory:   {snap.ManagedMB:F1} MB ({DeltaStr(snap.ManagedDeltaMB)} from baseline)"));
+            sb.AppendLine(Inv($"CPU/GPU frame:    Main {Counter(snap.MainThreadCpuMs, snap.MainThreadCpuAvailable, "ms")}, Render {Counter(snap.RenderThreadCpuMs, snap.RenderThreadCpuAvailable, "ms")}, GPU {Counter(snap.GpuFrameTimeMs, snap.GpuFrameTimeAvailable, "ms")}"));
+            sb.AppendLine(Inv($"Present wait:     {Counter(snap.PresentWaitMs, snap.PresentWaitAvailable, "ms")}"));
+            sb.AppendLine();
+        }
+
+        private static void AppendCounterAvailability(StringBuilder sb, OverlaySnapshot? snap)
+        {
+            ReportTextSections.AppendCounterAvailability(sb, snap);
+        }
+
+        private static void AppendCityContext(StringBuilder sb)
+        {
+            if (!CityContext.HasData) return;
+            sb.AppendLine("--- City Context ---");
+            sb.AppendLine(Inv($"Citizens:         {CityContext.Citizens:N0}"));
+            sb.AppendLine(Inv($"Vehicles:         {CityContext.Vehicles:N0}"));
+            sb.AppendLine(Inv($"Buildings:        {CityContext.Buildings:N0}"));
+            sb.AppendLine();
+        }
+
+        private static void AppendHealth(StringBuilder sb, HealthReport? health)
+        {
+            if (health == null) return;
+            sb.AppendLine("--- Health ---");
+            sb.AppendLine($"FPS:              {health.FpsLevel}");
+            sb.AppendLine($"Stutter:          {health.StutterLevel}");
+            sb.AppendLine($"Memory:           {health.MemoryLevel}  ({health.MemoryHint})");
+            sb.AppendLine($"Growth:           {health.GrowthLevel}");
+            sb.AppendLine($"Overall:          {health.Overall}");
+            sb.AppendLine($"Bottleneck:       {health.Bottleneck} — {health.BottleneckHint}");
+            sb.AppendLine();
+        }
+
+        private static void AppendRecommendations(StringBuilder sb, OverlaySnapshot? snap, HealthReport? health)
+        {
+            if (snap == null || health == null) return;
+            var recommendations = RecommendationEngine.Build(health, snap);
+            if (recommendations.Count == 0) return;
+
+            sb.AppendLine("--- Recommendations (why they appeared) ---");
+            foreach (var rec in recommendations)
             {
-                sb.AppendLine(Inv($"FPS:              {snap.AvgFps:F1} avg / {snap.MinFps:F1} min"));
-                sb.AppendLine(Inv($"Frame:            {snap.AvgFrameMs:F2} ms avg / {snap.MaxFrameMs:F2} ms max"));
-                sb.AppendLine(Inv($"Sim:              {snap.SimTicksPerSec:F0} ticks/s"));
-                sb.AppendLine(Inv($"Spikes:           {snap.Spikes30fps} below 30 fps, {snap.Spikes20fps} below 20 fps"));
-                sb.AppendLine(Inv($"Managed growth:   {snap.ManagedGrowthMBperSec:+0.00;-0.00} MB/s"));
-                sb.AppendLine(Inv($"Managed memory:   {snap.ManagedMB:F1} MB ({DeltaStr(snap.ManagedDeltaMB)} from baseline)"));
+                sb.AppendLine($"[{rec.Level}] {rec.Title}");
+                if (!string.IsNullOrEmpty(rec.Action))
+                    sb.AppendLine($"  Action: {rec.Action}");
+                if (!string.IsNullOrEmpty(rec.Reason))
+                    sb.AppendLine($"  Signal: {rec.Reason}");
             }
             sb.AppendLine();
+        }
 
-            if (CityContext.HasData)
-            {
-                sb.AppendLine("--- City Context ---");
-                sb.AppendLine(Inv($"Citizens:         {CityContext.Citizens:N0}"));
-                sb.AppendLine(Inv($"Vehicles:         {CityContext.Vehicles:N0}"));
-                sb.AppendLine(Inv($"Buildings:        {CityContext.Buildings:N0}"));
-                sb.AppendLine();
-            }
-
-            if (health != null)
-            {
-                sb.AppendLine("--- Health ---");
-                sb.AppendLine($"FPS:              {health.FpsLevel}");
-                sb.AppendLine($"Stutter:          {health.StutterLevel}");
-                sb.AppendLine($"Memory:           {health.MemoryLevel}  ({health.MemoryHint})");
-                sb.AppendLine($"Growth:           {health.GrowthLevel}");
-                sb.AppendLine($"Overall:          {health.Overall}");
-                sb.AppendLine($"Bottleneck:       {health.Bottleneck} — {health.BottleneckHint}");
-                sb.AppendLine();
-            }
-
-            if (snap?.TopMods != null && snap.TopMods.Length > 0)
-            {
-                sb.AppendLine($"--- Top Mods (by main-thread time, {WindowLabel(snap)}) ---");
-                foreach (var (modName, ms) in snap.TopMods)
-                    sb.AppendLine(Inv($"  {modName,-40} {ms,8:F1} ms"));
-                sb.AppendLine();
-            }
-
-            if (snap?.TopModSystems != null && snap.TopModSystems.Length > 0)
-            {
-                sb.AppendLine("--- Top Mod Systems (main-thread cost) ---");
-                foreach (var (name, ms) in snap.TopModSystems)
-                    sb.AppendLine(Inv($"  {name,-40} {ms,8:F1} ms"));
-                sb.AppendLine();
-            }
-
-            if (snap?.TopVanillaSystems != null && snap.TopVanillaSystems.Length > 0)
-            {
-                sb.AppendLine("--- Top Vanilla Systems (main-thread cost) ---");
-                foreach (var (name, ms) in snap.TopVanillaSystems)
-                    sb.AppendLine(Inv($"  {name,-40} {ms,8:F1} ms"));
-                sb.AppendLine();
-            }
-
-            if (snap?.ReplacedVanillaSystems != null && snap.ReplacedVanillaSystems.Length > 0)
-            {
-                sb.AppendLine("--- Patched Vanilla Systems (total Update ms, mod+vanilla split unknown) ---");
-                foreach (var (sys, owner, ms) in snap.ReplacedVanillaSystems)
-                    sb.AppendLine(Inv($"  {sys,-40} {ms,8:F1} ms  ← {owner}"));
-                sb.AppendLine();
-            }
-
-            sb.AppendLine($"--- Last {LOG_TAIL_LINES} lines of VanillaProfiler.log ---");
-            foreach (var line in TailPerfLog(LOG_TAIL_LINES))
-                sb.AppendLine(line);
-
-            return sb.ToString();
+        private static void AppendTopTables(StringBuilder sb, OverlaySnapshot? snap)
+        {
+            ReportTextSections.AppendTopTables(sb, snap, WindowLabel(snap));
         }
 
         private static IEnumerable<string> TailPerfLog(int count)
@@ -168,57 +190,9 @@ namespace VanillaProfiler.Diagnostics
                 if (length == 0)
                     return new[] { $"  ({LogFileSink.LOG_FILENAME} is empty)" };
 
-                var buffer = new byte[CHUNK];
-                long scanEnd = length;
-                stream.Position = length - 1;
-                if (stream.ReadByte() == '\n')
-                    scanEnd--;
-
-                long pos = scanEnd;
-                long startOffset = 0;
-                int newlines = 0;
-                while (pos > 0)
-                {
-                    int readSize = (int)Math.Min(CHUNK, pos);
-                    pos -= readSize;
-                    stream.Position = pos;
-                    int read = stream.Read(buffer, 0, readSize);
-                    if (read <= 0) break;
-
-                    for (int i = read - 1; i >= 0; i--)
-                    {
-                        if (buffer[i] != (byte)'\n') continue;
-                        newlines++;
-                        if (newlines == count)
-                        {
-                            startOffset = pos + i + 1;
-                            pos = 0;
-                            break;
-                        }
-                    }
-                }
-
-                int byteCount = checked((int)(length - startOffset));
-                var bytes = new byte[byteCount];
-                stream.Position = startOffset;
-                int total = 0;
-                while (total < byteCount)
-                {
-                    int read = stream.Read(bytes, total, byteCount - total);
-                    if (read <= 0) break;
-                    total += read;
-                }
-
-                string text = Encoding.UTF8.GetString(bytes, 0, total);
-                var raw = text.Split('\n');
-                int lineCount = raw.Length;
-                if (lineCount > 0 && raw[lineCount - 1].Length == 0)
-                    lineCount--;
-                int first = Math.Max(0, lineCount - count);
-                var lines = new List<string>(lineCount - first);
-                for (int i = first; i < lineCount; i++)
-                    lines.Add(raw[i].TrimEnd('\r'));
-                return lines;
+                long startOffset = FindTailStartOffset(stream, length, count, CHUNK);
+                string text = ReadUtf8From(stream, startOffset, length);
+                return LastLines(text, count);
             }
             catch (Exception ex)
             {
@@ -226,9 +200,124 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
+        private static long FindTailStartOffset(FileStream stream, long length, int count, int chunkSize)
+        {
+            var buffer = new byte[chunkSize];
+            long scanEnd = length;
+            stream.Position = length - 1;
+            if (stream.ReadByte() == '\n')
+                scanEnd--;
+
+            long pos = scanEnd;
+            long startOffset = 0;
+            int newlines = 0;
+            while (pos > 0)
+            {
+                int readSize = (int)Math.Min(chunkSize, pos);
+                pos -= readSize;
+                stream.Position = pos;
+                int read = stream.Read(buffer, 0, readSize);
+                if (read <= 0) break;
+                if (TryFindTailOffset(buffer, read, pos, count, ref newlines, out startOffset))
+                    break;
+            }
+            return startOffset;
+        }
+
+        private static bool TryFindTailOffset(
+            byte[] buffer, int read, long chunkStart, int count, ref int newlines, out long offset)
+        {
+            offset = 0;
+            for (int i = read - 1; i >= 0; i--)
+            {
+                if (buffer[i] != (byte)'\n') continue;
+                newlines++;
+                if (newlines != count) continue;
+                offset = chunkStart + i + 1;
+                return true;
+            }
+            return false;
+        }
+
+        private static string ReadUtf8From(FileStream stream, long startOffset, long length)
+        {
+            int byteCount = checked((int)(length - startOffset));
+            var bytes = new byte[byteCount];
+            stream.Position = startOffset;
+            int total = 0;
+            while (total < byteCount)
+            {
+                int read = stream.Read(bytes, total, byteCount - total);
+                if (read <= 0) break;
+                total += read;
+            }
+            return Encoding.UTF8.GetString(bytes, 0, total);
+        }
+
+        private static IReadOnlyList<string> LastLines(string text, int count)
+        {
+            var raw = text.Split('\n');
+            int lineCount = raw.Length;
+            if (lineCount > 0 && raw[lineCount - 1].Length == 0)
+                lineCount--;
+            int first = Math.Max(0, lineCount - count);
+            var lines = new List<string>(lineCount - first);
+            for (int i = first; i < lineCount; i++)
+                lines.Add(raw[i].TrimEnd('\r'));
+            return lines;
+        }
+
         private static string DeltaStr(double mb) => mb >= 0 ? Inv($"+{mb:F1} MB") : Inv($"{mb:F1} MB");
 
-        private static string WindowLabel(OverlaySnapshot snap)
+        private static string Counter(double value, bool available, string unit)
+            => available ? Inv($"{value:F2} {unit}") : "unavailable";
+
+        private static void TryWriteSupportBundle(string reportPath, string report)
+        {
+            try
+            {
+                string zipPath = Path.ChangeExtension(reportPath, ".zip");
+                if (File.Exists(zipPath)) File.Delete(zipPath);
+                using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+                AddTextEntry(zip, Path.GetFileName(reportPath), report);
+                AddFileIfExists(zip, SettingsStore.FilePath, "settings.json", maxBytes: 256 * 1024);
+                AddFileIfExists(zip, LogFileSink.GetLogPath(Application.persistentDataPath),
+                    LogFileSink.LOG_FILENAME, maxBytes: 1024 * 1024);
+                ModLog.Info($"Support bundle saved: {zipPath}");
+            }
+            catch (Exception ex)
+            {
+                ModLog.Warn($"Support bundle export failed: {ex.Message}");
+            }
+        }
+
+        private static void AddTextEntry(ZipArchive zip, string entryName, string text)
+        {
+            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Fastest);
+            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+            writer.Write(text);
+        }
+
+        private static void AddFileIfExists(ZipArchive zip, string path, string entryName, int maxBytes)
+        {
+            if (!File.Exists(path)) return;
+            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Fastest);
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var output = entry.Open();
+            CopyTail(input, output, maxBytes);
+        }
+
+        private static void CopyTail(Stream input, Stream output, int maxBytes)
+        {
+            long start = input.Length > maxBytes ? input.Length - maxBytes : 0;
+            input.Position = start;
+            var buffer = new byte[8192];
+            int read;
+            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                output.Write(buffer, 0, read);
+        }
+
+        private static string WindowLabel(OverlaySnapshot? snap)
         {
             if (snap?.WindowSeconds > 0)
                 return Inv($"last {snap.WindowSeconds:F1}s report window");

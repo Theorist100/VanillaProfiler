@@ -13,6 +13,9 @@ namespace VanillaProfiler.Aggregation
         public long GfxUsedBytes;
         public long AudioUsedBytes;
         public long SystemUsedBytes;
+        public bool GfxUsedAvailable;
+        public bool AudioUsedAvailable;
+        public bool SystemUsedAvailable;
 
         public long ManagedDelta;
         public long MonoHeapDelta;
@@ -28,10 +31,14 @@ namespace VanillaProfiler.Aggregation
         public long MainThreadCpuNs;
         public long RenderThreadCpuNs;
         public long GpuFrameTimeNs;
+        public bool MainThreadCpuAvailable;
+        public bool RenderThreadCpuAvailable;
+        public bool GpuFrameTimeAvailable;
         // CPU main-thread time spent waiting on the GPU swapchain — direct GPU-bound
         // indicator. High PresentWait + low Main = GPU bottleneck, ECS optimisation
         // does nothing for FPS.
         public long PresentWaitNs;
+        public bool PresentWaitAvailable;
 
         // Per-frame render counts from ProfilerCategory.Render. Counts (not bytes/ns).
         // Zero when the marker is stripped on this build.
@@ -39,9 +46,14 @@ namespace VanillaProfiler.Aggregation
         public long SetPassCallsCount;
         public long TrianglesCount;
         public long VerticesCount;
+        public bool DrawCallsAvailable;
+        public bool SetPassCallsAvailable;
+        public bool TrianglesAvailable;
+        public bool VerticesAvailable;
         // Number of shadow-casting renderers visible this frame. Sudden jumps reveal
         // shadow-rendering load spikes (e.g. new prop pack with shadow-cast meshes).
         public long ShadowCastersCount;
+        public bool ShadowCastersAvailable;
 
         // GPU memory breakdown — splits the opaque "Gfx total" into buffers vs textures.
         // Used Buffers grows with mesh/data uploads; Render Textures grows with
@@ -49,15 +61,20 @@ namespace VanillaProfiler.Aggregation
         public long UsedBuffersBytes;
         public long UsedBuffersCount;
         public long RenderTexturesBytes;
+        public bool UsedBuffersBytesAvailable;
+        public bool UsedBuffersCountAvailable;
+        public bool RenderTexturesBytesAvailable;
 
         // GC.Collect total stall time over the report window + how many collections
         // occurred. Distinguishes GC-induced stutter from non-GC main-thread stalls.
         public long GcCollectTotalNs;
         public long GcCollectCount;
+        public bool GcCollectAvailable;
 
         // Process resident set (physical RAM actually held). Diverges from
         // System Used Memory when the OS pages parts out under pressure — catches
         // swap-thrash before a hard OOM crash.
         public long AppResidentBytes;
+        public bool AppResidentAvailable;
     }
 }

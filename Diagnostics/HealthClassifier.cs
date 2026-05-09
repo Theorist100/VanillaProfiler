@@ -39,8 +39,8 @@ namespace VanillaProfiler.Diagnostics
         public HealthLevel GrowthLevel;
         public HealthLevel Overall;
         public BottleneckKind Bottleneck;
-        public string MemoryHint;       // "Stable" | "Growing" | "LEAK SUSPECTED: +120 MB over 30s"
-        public string BottleneckHint;   // short actionable advice
+        public string MemoryHint = "Stable";       // "Stable" | "Growing" | "LEAK SUSPECTED: +120 MB over 30s"
+        public string BottleneckHint = "Collecting data...";   // short actionable advice
 
         // Per-frame averages of the two main phases. Diagnosis uses absolute ms to
         // pick how detailed the advice should be.
@@ -87,8 +87,6 @@ namespace VanillaProfiler.Diagnostics
             double renderPhaseMs)
         {
             var report = new HealthReport();
-            if (snap == null) return report;
-
             report.FpsLevel = ClassifyFps(snap.AvgFps);
             report.StutterLevel = ClassifyStutter(snap.MaxFrameMs, snap.Spikes30fps, snap.WindowSeconds);
             report.MemoryLevel = ClassifyMemory(snap.ManagedDeltaMB, mem);
@@ -197,11 +195,11 @@ namespace VanillaProfiler.Diagnostics
 
         private static bool HasRenderHeavyVanillaTop(OverlaySnapshot snap)
         {
-            if (snap.TopVanillaSystems == null || snap.TopVanillaSystems.Length == 0) return false;
+            if (snap.TopVanillaSystems.Count == 0) return false;
             var top = snap.TopVanillaSystems[0];
             if (top.TotalMs < 30.0) return false;
             foreach (var name in s_RenderHeavyVanillaSystems)
-                if (top.Name == name) return true;
+                if (string.Equals(top.Name, name, StringComparison.Ordinal)) return true;
             return false;
         }
 
@@ -229,7 +227,7 @@ namespace VanillaProfiler.Diagnostics
             // NaN compares false against every threshold and would fall through to Poor.
             // Treat as Good — the most charitable interpretation when we have no signal.
             if (double.IsNaN(deltaMB) || double.IsInfinity(deltaMB)) return HealthLevel.Good;
-            if (mem != null && mem.LeakSuspected) return HealthLevel.Poor;
+            if (mem.LeakSuspected) return HealthLevel.Poor;
             if (deltaMB < MEM_DELTA_OK_MB) return HealthLevel.Good;
             if (deltaMB < MEM_DELTA_POOR_MB) return HealthLevel.Ok;
             return HealthLevel.Poor;
@@ -254,7 +252,6 @@ namespace VanillaProfiler.Diagnostics
 
         private static string BuildMemoryHint(MemoryHistory mem)
         {
-            if (mem == null) return "Stable";
             if (mem.LeakSuspected)
                 return Inv($"LEAK SUSPECTED: {Delta(mem.TotalGrownMB)} MB over {mem.WindowSeconds}s");
             if (mem.GrowthMBperSec > 0.2)
