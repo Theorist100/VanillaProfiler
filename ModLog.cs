@@ -23,37 +23,41 @@ namespace VanillaProfiler
 
         private static void Dispatch(SystemLogLevel level, string msg)
         {
-            var p = ProfilerHost.TryGetReadSurface();
-            if (p != null)
+            IProfilerReadSurface? target;
+            bool mirrorToColossal;
+            lock (s_Lock)
             {
-                Route(p, level, msg);
+                target = ProfilerHost.TryGetReadSurface();
+                mirrorToColossal = target == null;
+                if (mirrorToColossal && s_Buffer.Count < BUFFER_CAP)
+                    s_Buffer.Add((level, msg));
+            }
+
+            if (target != null)
+            {
+                Route(target, level, msg);
                 return;
             }
 
             // Buffer until Profiler is ready; also mirror to Colossal Log so the mod
             // is still visible in Modding.log if anything goes wrong before Flush().
-            lock (s_Lock)
-            {
-                if (s_Buffer.Count < BUFFER_CAP)
-                    s_Buffer.Add((level, msg));
-            }
-            MirrorToColossal(level, msg);
+            if (mirrorToColossal) MirrorToColossal(level, msg);
         }
 
         /// <summary>Replay every buffered message into the live Profiler. Call once after Register.</summary>
         public static void Flush()
         {
-            var p = ProfilerHost.TryGetReadSurface();
-            if (p == null) return;
-
+            IProfilerReadSurface? target;
             (SystemLogLevel, string)[] drained;
             lock (s_Lock)
             {
+                target = ProfilerHost.TryGetReadSurface();
+                if (target == null) return;
                 drained = s_Buffer.ToArray();
                 s_Buffer.Clear();
             }
             foreach (var (level, msg) in drained)
-                Route(p, level, msg);
+                Route(target, level, msg);
         }
 
         public static void ClearBuffer()
