@@ -96,11 +96,7 @@ namespace VanillaProfiler.Aggregation
             // a sliding window of roughly the last 5 seconds — close to the default
             // ReportIntervalSec of 5s. Was 15 (~250ms) which gave reports a misleading
             // micro-window snapshot inconsistent with the surrounding 5-second cadence.
-            StartMemoryRecorders();
-            StartTimingRecorders();
-            StartRenderCountRecorders();
-            StartGpuBreakdownRecorders();
-            StartGcRecorder();
+            StartRecorders();
 
             // Speculative job-worker recorders were dropped: MarkerEnumerator confirmed
             // CS2 release strips JobsParallelFor.Execute / WaitForJobGroupID. Adding
@@ -168,7 +164,29 @@ namespace VanillaProfiler.Aggregation
             m_GcCollectRecorder = ProfilerRecorderFactory.StartByHandle("GC", "GC.Collect", 4096);
         }
 
+        private void StartRecorders()
+        {
+            StartMemoryRecorders();
+            StartTimingRecorders();
+            StartRenderCountRecorders();
+            StartGpuBreakdownRecorders();
+            StartGcRecorder();
+        }
+
         public void Dispose()
+        {
+            DisposeRecorders();
+        }
+
+        public void ResetSession()
+        {
+            DisposeRecorders();
+            m_Samples.Clear();
+            StartRecorders();
+            ResetBaseline();
+        }
+
+        private void DisposeRecorders()
         {
             // Dispose unconditionally. ProfilerRecorder.Valid only reports whether the
             // marker was found at StartNew time — speculative recorders that started Valid

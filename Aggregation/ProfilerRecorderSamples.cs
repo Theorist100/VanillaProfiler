@@ -31,6 +31,11 @@ namespace VanillaProfiler.Aggregation
             return n > 0 ? sum / n : 0;
         }
 
+        public void Clear()
+        {
+            m_Buffer.Clear();
+        }
+
         public (long sum, long count) SumWithCount(ProfilerRecorder recorder)
         {
             if (!recorder.Valid || recorder.Capacity == 0) return (0, 0);

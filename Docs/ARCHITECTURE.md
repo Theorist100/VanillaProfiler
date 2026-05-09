@@ -16,6 +16,8 @@ Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) c
 VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
 ├── Profiler.cs                 Main-thread coordinator. Implements IProfilerPatchSurface + IProfilerReadSurface; delegates timing to ReportScheduler and sink fan-out to ReportDispatcher.
+├── ProfilerSessionState.cs     Lifecycle/read-state owner; clears public snapshots on menu/loading/city boundaries.
+├── SessionBoundary.cs          Typed reset reasons used by Profiler.ResetForBoundary.
 ├── IProfilerSurfaces.cs        Two interfaces over the same Profiler instance:
 │                               • IProfilerPatchSurface — narrow surface for Harmony patches and ECS counter systems
 │                                 (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase)
@@ -86,6 +88,8 @@ VanillaProfiler (assembly)
 
 `Profiler` is an **instance** owned by `VanillaProfilerMod`. `ProfilerHost` exposes it only through two interfaces: `ProfilerHost.TryGetPatchSurface()` returns `IProfilerPatchSurface` for Harmony patches and ECS counter systems; `ProfilerHost.TryGetReadSurface()` returns `IProfilerReadSurface` for overlay, export, lifecycle and logging. The concrete `Profiler` type is not reachable through the host. `MainThreadGuard` asserts the main-thread contract on the patch surface; `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
 
+`ProfilerSessionState` is the single lifecycle/read-state source. `Mod.OnLoad` calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` immediately after registering the profiler, so hot-reloading the mod while a city is already active enters the same settling path as a normal load-complete callback. City load/unload, loading start and dispose all route through `Profiler.ResetForBoundary(SessionBoundary)`; that reset clears stale public snapshots, city context, graphics/replacement caches, spike screenshot state, memory history and the scheduler. `MemorySampler.ResetSession()` recreates Unity `ProfilerRecorder` instances at these boundaries so CPU/GPU timing windows do not bleed across menu/loading/previous-city samples.
+
 ## Key contracts
 
 ### `Profiler.OnFrame()`
@@ -131,7 +135,7 @@ Why a separate bucket: a Harmony prefix can wrap or skip the original `OnUpdate`
 
 Sliding window of 12 samples (≈ 60 s at 5 s reporting). Leak detection requires a full 5-sample window so a single one-off allocation doesn't trip the alarm. The metric used is the **median** delta per report — robust against single outliers.
 
-`MemoryHistory` receives a `Func<ProfilerSettingsSnapshot>` accessor at construction; `WindowSeconds` is computed against the snapshot's `ReportIntervalSec` so changing the report cadence at runtime keeps the displayed text honest.
+`MemoryHistory` receives a `Func<ProfilerSettingsSnapshot>` accessor at construction; `WindowSeconds` is computed against the snapshot's `ReportIntervalSec` so changing the report cadence at runtime keeps the displayed text honest. A report elapsed time greater than `2 × ReportIntervalSec` is treated as a long pause/loading/alt-tab boundary and resets the leak window instead of inserting a clamped sample; explicit session boundaries call `OnSessionBoundary()` for the same reason.
 
 ### `HealthClassifier`
 
@@ -195,7 +199,7 @@ The mod follows a **main-thread measurement** rule rather than scattering locks 
   - `RecordPhase` is called from the per-phase Postfix — main thread.
   - `RecordSystem` is called from `SystemBase.Update` Postfix — main thread.
   - `RecordPatchedVanilla` is called from `SystemBase.Update` Postfix when `SystemReplacementDetector.IsPatched(type)` returns true — main thread.
-  - `ReportScheduler`, `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report`.
+  - `ReportScheduler`, `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report` and lifecycle boundary resets.
   - `LastSnapshot` and `LastHealth` are written by `Report` and read by `ProfilerOverlay.OnGUI` — both main thread.
   - `OverlayState` (mode index, anchor) is written and read by `ProfilerOverlay` only — main thread.
 - **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so a stale Harmony callback landing after `Mod.OnDispose` no-ops cleanly.

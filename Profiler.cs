@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using Game;
 using VanillaProfiler.Aggregation;
 using VanillaProfiler.Diagnostics;
 using VanillaProfiler.Output;
@@ -76,8 +77,21 @@ namespace VanillaProfiler
         {
             m_Disposed = true;
             m_Dispatcher.Shutdown();
-            ResetMeasurementSession(resetCityContext: true);
+            ResetForBoundary(SessionBoundary.Dispose);
             m_Memory.Dispose();
+        }
+
+        public void InitializeFromCurrentMode(GameMode current)
+        {
+            MainThreadGuard.AssertMainThread(nameof(InitializeFromCurrentMode));
+            if (m_Disposed) return;
+            if (!m_Session.Initialize(current)) return;
+
+            ResetForBoundary(m_Session.IsSettling
+                ? SessionBoundary.GameLoaded
+                : SessionBoundary.GameUnloaded);
+            if (m_Session.IsSettling)
+                PrepareLoadedGameSession();
         }
 
         public void SetGameLoaded(bool gameLoaded)
@@ -87,12 +101,9 @@ namespace VanillaProfiler
 
             if (!m_Session.SetGameLoaded(gameLoaded)) return;
 
-            ResetMeasurementSession(resetCityContext: true);
+            ResetForBoundary(gameLoaded ? SessionBoundary.GameLoaded : SessionBoundary.GameUnloaded);
             if (m_Session.IsSettling)
-            {
-                SystemReplacementDetector.Scan();
-                MemoryHistory.SuppressNextReports(5);
-            }
+                PrepareLoadedGameSession();
         }
 
         public void BeginLoading(bool loadsCity)
@@ -106,7 +117,7 @@ namespace VanillaProfiler
             }
 
             if (!m_Session.BeginLoading()) return;
-            ResetMeasurementSession(resetCityContext: true);
+            ResetForBoundary(SessionBoundary.BeginLoading);
         }
 
         // ---------- Hot-path recording ----------
@@ -273,21 +284,34 @@ namespace VanillaProfiler
             return arr;
         }
 
-        private void ResetMeasurementSession(bool resetCityContext)
+        private void ResetForBoundary(SessionBoundary kind)
         {
             m_Metrics.Reset();
-            m_Memory.ResetBaseline();
-            MemoryHistory.Reset();
+            m_Memory.ResetSession();
+            MemoryHistory.OnSessionBoundary();
             FpsSparkline.Reset();
             m_SpikeScreenshots.Reset();
             m_GraphicsSettings.Invalidate();
             SystemReplacementDetector.Reset();
-            if (resetCityContext)
-                CityContext.Reset();
+            switch (kind)
+            {
+                case SessionBoundary.Dispose:
+                case SessionBoundary.BeginLoading:
+                case SessionBoundary.GameLoaded:
+                case SessionBoundary.GameUnloaded:
+                    CityContext.Reset();
+                    break;
+            }
             m_HarmonyScanned = false;
             m_ReplacementsLogged = false;
             m_Scheduler.Reset();
             m_Session.ClearReadState();
+        }
+
+        private void PrepareLoadedGameSession()
+        {
+            SystemReplacementDetector.Scan();
+            MemoryHistory.SuppressNextReports(5);
         }
 
     }

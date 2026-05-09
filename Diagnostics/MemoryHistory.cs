@@ -32,24 +32,18 @@ namespace VanillaProfiler.Diagnostics
 
         public void Record(long managedBytes, float elapsedSec)
         {
-            double sampleSeconds = NormalizeElapsed(elapsedSec, out bool clamped);
+            if (IsLongPause(elapsedSec))
+            {
+                Reset();
+                return;
+            }
+
+            double sampleSeconds = NormalizeElapsed(elapsedSec);
             if (m_SuppressedReports > 0)
             {
                 m_SuppressedReports--;
                 m_TotalSeconds += sampleSeconds;
                 ClearComputed();
-                return;
-            }
-
-            // A clamped elapsed (long stutter, alt-tab, debugger pause) advances our
-            // bookkept clock by less than real wall time. Inserting a sample anyway
-            // makes the next pair's bytes/dt look inflated — 25 MB allocated over a
-            // real 30s but credited to a clamped 10s reads as 2.5 MB/s and trips the
-            // 1 MB/s leak threshold falsely. Skip the sample on clamp; only the stutter
-            // duration leaks into m_TotalSeconds so subsequent rate math stays honest.
-            if (clamped)
-            {
-                m_TotalSeconds += sampleSeconds;
                 return;
             }
 
@@ -67,6 +61,11 @@ namespace VanillaProfiler.Diagnostics
             m_SuppressedReports = 0;
             m_TotalSeconds = 0;
             ClearComputed();
+        }
+
+        public void OnSessionBoundary()
+        {
+            Reset();
         }
 
         public void SuppressNextReports(int count)
@@ -129,23 +128,19 @@ namespace VanillaProfiler.Diagnostics
             WindowSeconds = 0;
         }
 
-        private double NormalizeElapsed(float elapsedSec, out bool clamped)
+        private double NormalizeElapsed(float elapsedSec)
         {
-            clamped = false;
             double fallback = ReportIntervalS;
             if (elapsedSec <= 0 || float.IsNaN(elapsedSec) || float.IsInfinity(elapsedSec))
-            {
-                clamped = true;
                 return fallback;
-            }
-
-            double max = fallback * 2.0;
-            if (elapsedSec > max)
-            {
-                clamped = true;
-                return max;
-            }
             return elapsedSec;
+        }
+
+        private bool IsLongPause(float elapsedSec)
+        {
+            if (elapsedSec <= 0 || float.IsNaN(elapsedSec) || float.IsInfinity(elapsedSec))
+                return false;
+            return elapsedSec > ReportIntervalS * 2.0f;
         }
 
         private float ReportIntervalS => m_Settings().Settings.ReportIntervalSec;

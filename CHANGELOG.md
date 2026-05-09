@@ -12,7 +12,10 @@
 
 - Engine counter UI can show `n/a` for unavailable markers.
 - ECB playback timing records elapsed time even when playback throws and Harmony runs the finalizer path.
+- Session lifecycle now initializes from the current game mode on mod load, so reloading the mod inside a city starts measuring without waiting for a future load callback.
+- Long pauses now reset the managed-memory leak window instead of clamping elapsed time into a false growth rate.
 
 ### Internal
 
 - Local analyzer profile remains ignored by git and can be run with `.\scripts\check-local.ps1`.
+- Session boundary resets now go through a typed `SessionBoundary` path and recreate Unity `ProfilerRecorder` timing counters.

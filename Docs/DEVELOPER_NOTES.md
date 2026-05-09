@@ -92,6 +92,8 @@ Everything else is **main-thread only**:
 - `LastSnapshot` / `LastHealth` written by `Report` and read by overlay — both main thread
 - `OverlayState` (UI navigation: mode index, anchor) — written and read on the main thread by `ProfilerOverlay`
 
+Session lifecycle is centralized in `ProfilerSessionState`. Do not reset measurement fields directly from lifecycle callbacks; route load/unload/dispose through `Profiler.ResetForBoundary(SessionBoundary)` so metrics, public snapshots, memory history, recorder windows, graphics probes, replacement scans and city context reset together. `Mod.OnLoad` also calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` so hot-reload inside an already loaded city does not wait for a future load callback.
+
 `SystemReplacementDetector.s_PatchedTypes` is a static `HashSet<Type>` published by `Scan()` (called from `Profiler.Report` once per cycle) and read by the `SystemAutoProfiler.Postfix` hot path. Both run main-thread, so the swap is a plain reference assignment — no `volatile` needed. A live reader sees either the previous full set or the new full set, never a half-populated one (the new set is built off to the side and assigned at the end of `Scan()`).
 
 Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a surface via `ProfilerHost.TryGetPatchSurface()` will no-op.

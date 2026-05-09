@@ -41,6 +41,7 @@ namespace VanillaProfiler
                 var logDir = LogFileSink.GetLogDirectory(UnityEngine.Application.persistentDataPath);
 
                 RegisterProfiler(logDir);
+                InitializeProfilerLifecycle();
                 RegisterGameLifecycleCallbacks();
                 ModLog.Info($"Log directory: {logDir}");
                 ModAttribution.PrewarmLoadedAssemblies();
@@ -72,6 +73,11 @@ namespace VanillaProfiler
 
             // Diagnostic only; confirms MemorySampler's hardcoded counter names are still valid.
             MarkerEnumerator.LogAvailable();
+        }
+
+        private void InitializeProfilerLifecycle()
+        {
+            m_Profiler?.InitializeFromCurrentMode(GameManager.instance.gameMode);
         }
 
         private static void RegisterGameLifecycleCallbacks()

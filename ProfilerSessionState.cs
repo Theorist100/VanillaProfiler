@@ -1,4 +1,5 @@
 using VanillaProfiler.Diagnostics;
+using Game;
 
 namespace VanillaProfiler
 {
@@ -17,6 +18,17 @@ namespace VanillaProfiler
             || LifecycleState == ProfilerLifecycleState.Active;
         public bool IsLoading => LifecycleState == ProfilerLifecycleState.LoadingCity;
         public bool IsSettling => LifecycleState == ProfilerLifecycleState.Settling;
+
+        public bool Initialize(GameMode current)
+        {
+            var next = current == GameMode.Game
+                ? ProfilerLifecycleState.Settling
+                : ProfilerLifecycleState.NoCity;
+            if (LifecycleState == next) return false;
+            LifecycleState = next;
+            ClearReadState();
+            return true;
+        }
 
         public bool BeginLoading()
         {
