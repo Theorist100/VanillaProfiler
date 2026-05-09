@@ -134,11 +134,11 @@ namespace VanillaProfiler.Aggregation
             StoreSpare(ref m_SpareModSystems, sample.ModSystems);
             StoreSpare(ref m_SpareModAggregate, sample.ModAggregate);
             StoreSpare(ref m_SparePatchedVanillaSystems, sample.PatchedVanillaSystems);
-            sample.Phases = new Dictionary<string, PhaseData>();
-            sample.VanillaSystems = new Dictionary<string, PhaseData>();
-            sample.ModSystems = new Dictionary<string, PhaseData>();
-            sample.ModAggregate = new Dictionary<string, PhaseData>();
-            sample.PatchedVanillaSystems = new Dictionary<string, PhaseData>();
+            sample.Phases = MetricsSample.EmptyPhaseData;
+            sample.VanillaSystems = MetricsSample.EmptyPhaseData;
+            sample.ModSystems = MetricsSample.EmptyPhaseData;
+            sample.ModAggregate = MetricsSample.EmptyPhaseData;
+            sample.PatchedVanillaSystems = MetricsSample.EmptyPhaseData;
         }
 
         public void Reset()

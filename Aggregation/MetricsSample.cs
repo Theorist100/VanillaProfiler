@@ -9,6 +9,9 @@ namespace VanillaProfiler.Aggregation
     /// </summary>
     public sealed class MetricsSample
     {
+        internal static readonly IReadOnlyDictionary<string, PhaseData> EmptyPhaseData =
+            new Dictionary<string, PhaseData>();
+
         public long FrameTimeSum;
         public long FrameTimeMax;
         public float ElapsedSec;
@@ -16,10 +19,10 @@ namespace VanillaProfiler.Aggregation
         public int SimTickCount;
         public int Spikes30;
         public int Spikes20;
-        public IReadOnlyDictionary<string, PhaseData> Phases = new Dictionary<string, PhaseData>();
-        public IReadOnlyDictionary<string, PhaseData> VanillaSystems = new Dictionary<string, PhaseData>();
-        public IReadOnlyDictionary<string, PhaseData> ModSystems = new Dictionary<string, PhaseData>();
-        public IReadOnlyDictionary<string, PhaseData> ModAggregate = new Dictionary<string, PhaseData>();
+        public IReadOnlyDictionary<string, PhaseData> Phases = EmptyPhaseData;
+        public IReadOnlyDictionary<string, PhaseData> VanillaSystems = EmptyPhaseData;
+        public IReadOnlyDictionary<string, PhaseData> ModSystems = EmptyPhaseData;
+        public IReadOnlyDictionary<string, PhaseData> ModAggregate = EmptyPhaseData;
 
         // Vanilla systems whose OnUpdate currently has a foreign Harmony
         // prefix. Populated unconditionally (independent of the
@@ -27,6 +30,6 @@ namespace VanillaProfiler.Aggregation
         // section can show total Update ms — that elapsed time blends the
         // mod's prefix and the vanilla original, but the total is honest.
         // Disjoint from VanillaSystems so totals are not double-counted.
-        public IReadOnlyDictionary<string, PhaseData> PatchedVanillaSystems = new Dictionary<string, PhaseData>();
+        public IReadOnlyDictionary<string, PhaseData> PatchedVanillaSystems = EmptyPhaseData;
     }
 }
