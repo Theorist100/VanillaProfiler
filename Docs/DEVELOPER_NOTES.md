@@ -18,7 +18,7 @@ The flow is always: collect → classify → render. Pick where you plug in:
 Hook into `Profiler.OnFrame` (called from `UpdateSystemPatch` Rendering phase, main thread). Frame timing and report cadence are owned by `ReportScheduler` — do not duplicate that logic. Add an instance accumulator field on `Profiler` directly — no lock needed because `OnFrame` is main-thread only. Drain and reset it in `Profiler.Report()`. Add a field to `OverlaySnapshot`, fill it in `ReportBuilder.Build`, render it in an `IOverlayMode` implementation.
 
 ### Per-system metric (main-thread)
-Add a method on `MetricsAggregator` and expose it via a delegating method on `Profiler`. If the new method is called from a Harmony patch or ECS system, also add it to `IProfilerHotPath` so the hot-path contract stays explicit. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
+Add a method on `MetricsAggregator` and expose it via a delegating method on `Profiler`. If the new method is called from a Harmony patch or ECS system, also add it to `IProfilerPatchSurface` so the contract stays explicit; if it is called from overlay/export/lifecycle code, add it to `IProfilerReadSurface` instead. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
 
 ### Per-report metric
 If you only need a value once per report (e.g. a rare query), add it directly inside `Profiler.Report()` after `MetricsAggregator.Drain()`. Main-thread context — touch instance fields freely.
@@ -27,7 +27,7 @@ If you only need a value once per report (e.g. a rare query), add it directly in
 Implement `IReportSink` and pass an instance into `Profiler` via `Mod.OnLoad` (`new Profiler(new IReportSink[] { ..., yourSink })`). `ReportDispatcher` isolates per-sink failures, so your sink may throw without breaking other sinks.
 
 ### Settings access
-Inside runtime services, prefer the immutable `ProfilerSettingsSnapshot` (read once via `SettingsStore.Snapshot`) over `SettingsStore.Current` to keep settings reads explicit and consistent across a frame.
+`ProfilerSettings` is immutable. Read settings via `SettingsStore.Snapshot` (returns `ProfilerSettingsSnapshot`); runtime services should accept a `Func<ProfilerSettingsSnapshot>` accessor at construction so reads stay explicit and consistent across a frame. Mutations go through `SettingsStore.Apply(newSettings)` (replace) or `SettingsStore.Update(s => s.With(field: value))` (functional update). There is no public mutable `Current` — draw paths and patches cannot accidentally edit live settings.
 
 ### Health / bottleneck rule
 Add a constant threshold in `HealthClassifier`. Add a field to `HealthReport`. Update `Classify()`. Render the new field in the appropriate `IOverlayMode` implementation (`StatusMode` for player-facing, `DetailsMode` for power users).
@@ -80,7 +80,7 @@ Signature touches: 1 px gold border on all four sides, 3 px gold accent strip on
 
 ## Thread safety
 
-Profiler measurement state is **main-thread only**. The hot-path entry points called from Harmony patches and ECS systems are formalised in `IProfilerHotPath` (`OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`); when adding a new hot-path method, add it there too so the surface stays explicit. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
+Profiler measurement state is **main-thread only**. The patch surface (`IProfilerPatchSurface`) called from Harmony patches and ECS counter systems exposes `OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`; the read/control surface (`IProfilerReadSurface`) used by overlay/export/lifecycle is separate. `ProfilerHost` only exposes the live `Profiler` through these two interfaces — the concrete type cannot leak across patch/read boundaries. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
 
 Everything else is **main-thread only**:
 - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread (rendering always is)
@@ -94,9 +94,9 @@ Everything else is **main-thread only**:
 
 `SystemReplacementDetector.s_PatchedTypes` is a static `HashSet<Type>` published by `Scan()` (called from `Profiler.Report` once per cycle) and read by the `SystemAutoProfiler.Postfix` hot path. Both run main-thread, so the swap is a plain reference assignment — no `volatile` needed. A live reader sees either the previous full set or the new full set, never a half-populated one (the new set is built off to the side and assigned at the end of `Scan()`).
 
-Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a reference via `ProfilerHost.TryGet()` will no-op.
+Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a surface via `ProfilerHost.TryGetPatchSurface()` will no-op.
 
-`ProfilerHost.TryGet()` returns the current instance via `Volatile.Read`. **Never** combine `IsAvailable` with a separate `Current` access — that's TOCTOU. Capture into a local: `var p = ProfilerHost.TryGet(); p?.OnSimTick();`.
+`ProfilerHost.TryGetReadSurface()` and `ProfilerHost.TryGetPatchSurface()` each do a single `Volatile.Read`. Capture into a local before use: `var p = ProfilerHost.TryGetPatchSurface(); p?.OnSimTick();`. `ProfilerHost.IsAvailable` is a single-shot existence check (used by `CityContextSystem` to skip work when no profiler is alive); never pair it with a subsequent `TryGet*Surface()` in the same control flow — that re-introduces the Unregister race.
 
 ## Testing locally
 

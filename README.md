@@ -42,9 +42,9 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 ```
 .
 ├── Mod.cs                              IMod entrypoint, Harmony patches, system registration
-├── Profiler.cs                         Instance facade — implements IProfilerHotPath, owns aggregator, sampler, builder, sinks
-├── IProfilerHotPath.cs                 Narrow interface exposed to Harmony patches and ECS counter systems
-├── ProfilerHost.cs                     Static handle to the live Profiler instance (Volatile.Read)
+├── Profiler.cs                         Instance facade — implements IProfilerPatchSurface + IProfilerReadSurface, owns aggregator, sampler, builder, sinks
+├── IProfilerSurfaces.cs                Two interfaces: IProfilerPatchSurface (Harmony/ECS hot path) and IProfilerReadSurface (overlay/export/lifecycle/log)
+├── ProfilerHost.cs                     Static handle — exposes the live profiler only as IProfilerPatchSurface or IProfilerReadSurface (Volatile.Read)
 ├── ProfilerLifecycleState.cs           Lifecycle enum: NoCity / LoadingCity / Settling / Active
 ├── ProfilerOverlay.cs                  MonoBehaviour shell — picks an IOverlayMode, draws panel
 ├── ReportScheduler.cs                  Owns frame-to-frame timing and report cadence
@@ -92,7 +92,8 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── SettingsPanel.cs                Ctrl+F8 panel using draft-then-apply pattern
 │   ├── SettingsWidgets.cs              Stateless DrawTextField / DrawSegmented helpers
 │   ├── SettingsValidation.cs           Bounds and sanity checks for the draft before apply
-│   ├── SettingsDraft.cs                Clone(ProfilerSettings) helper for the draft pattern
+│   ├── SettingsDraft.cs                Mutable form state — absorbs IMGUI edits before Apply rebuilds an immutable ProfilerSettings
+│   ├── SettingsDirtyState.cs           Per-field dirty flags; merges draft into the live ProfilerSettings via .With(...)
 │   └── Modes/
 │       ├── HiddenMode.cs               No-op mode
 │       ├── StatusMode.cs               Player-facing traffic light + likely cause
@@ -105,18 +106,18 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
     ├── HealthClassifier.cs             GOOD/OK/POOR per metric + bottleneck verdict
     ├── MemoryHistory.cs                Rolling 60 s window, median delta leak detector
     ├── FpsSparkline.cs                 Unicode block chart of last 60 s of FPS
-    ├── SpikeScreenshot.cs              Frame > threshold → ScreenCapture, throttled
+    ├── SpikeScreenshot.cs              Frame > threshold → ScreenCapture, throttled (instance, owned by Profiler)
     ├── HarmonyConflictDetector.cs      Lists multi-owner patches involving VanillaProfiler
     ├── SystemReplacementDetector.cs    Lists vanilla OnUpdate methods prefixed by other mods
-    ├── GraphicsSettingsProbe.cs        Reads CS2 graphics settings (LOD, volumetrics, etc.) for recommendations
+    ├── GraphicsSettingsProbe.cs        Reads CS2 graphics settings (LOD, volumetrics, etc.) — instance, owned by Profiler
     ├── Recommendation.cs               DTO for a single recommendation (level + title + reason + action)
-    ├── RecommendationEngine.cs         Builds recommendations from health + snapshot + probed settings
+    ├── RecommendationEngine.cs         Builds recommendations from health + snapshot + probed settings — instance, takes GraphicsSettingsProbe via DI
     ├── CityContext.cs                  Static snapshot of in-game entity counts
     ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt + bounded CSII_Report_*.zip support bundle
     ├── ReportTextSections.cs           Shared text sections (counter availability, top tables) for export and log
-    ├── ProfilerSettings.cs             User-preferences DTO with Clamp() — no I/O of its own
-    ├── ProfilerSettingsSnapshot.cs     Immutable point-in-time settings view passed through hot/cold boundaries
-    └── SettingsStore.cs                Load / Save / Current / Snapshot — atomic .tmp+.bak write protocol
+    ├── ProfilerSettings.cs             Immutable user-preferences DTO with .With(...) and .Normalize() — no I/O of its own
+    ├── ProfilerSettingsSnapshot.cs     Point-in-time settings view passed through hot/cold boundaries (holds an immutable ProfilerSettings reference)
+    └── SettingsStore.cs                Load / Apply / Update / Snapshot — atomic .tmp+.bak write protocol; settings are not mutable from runtime code
 ```
 
 ## Output locations

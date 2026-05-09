@@ -15,9 +15,14 @@ Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) c
 ```
 VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
-├── Profiler.cs                 Main-thread coordinator. Implements IProfilerHotPath; delegates timing to ReportScheduler and sink fan-out to ReportDispatcher.
-├── IProfilerHotPath.cs         Narrow interface exposed to Harmony patches and ECS counter systems (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase).
-├── ProfilerHost.cs             Static handle — Volatile.Read of the live Profiler instance.
+├── Profiler.cs                 Main-thread coordinator. Implements IProfilerPatchSurface + IProfilerReadSurface; delegates timing to ReportScheduler and sink fan-out to ReportDispatcher.
+├── IProfilerSurfaces.cs        Two interfaces over the same Profiler instance:
+│                               • IProfilerPatchSurface — narrow surface for Harmony patches and ECS counter systems
+│                                 (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase)
+│                               • IProfilerReadSurface — overlay/export/lifecycle/log surface (LastSnapshot,
+│                                 LastHealth, MemoryHistory, FpsSparkline, SpikeScreenshots, GraphicsSettings,
+│                                 Recommendations, LifecycleState, ForceReport, SetGameLoaded, BeginLoading, LogInfo/Warn/Error)
+├── ProfilerHost.cs             Static handle — Volatile.Read returning IProfilerPatchSurface or IProfilerReadSurface; the concrete Profiler type is not exposed.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic. Holds OverlayState for navigation.
 ├── ReportScheduler.cs          Owns frame-to-frame timing and report cadence; answers "is a report due now?".
 ├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (main-thread cost).
@@ -41,11 +46,11 @@ VanillaProfiler (assembly)
                     │  • EntityCommandBuffer.Playback (ECB time)  │
                     │  • SimTickCounterSystem      (per sim tick) │
                     └──────────┬──────────────────────────────────┘
-                               │ Stopwatch deltas via IProfilerHotPath
+                               │ Stopwatch deltas via IProfilerPatchSurface
                                ▼
                     ┌──────────────────────────────────────────┐
                     │  Profiler  (instance, held by ProfilerHost)│
-                    │  Hot-path entries (IProfilerHotPath):     │
+                    │  Patch entries (IProfilerPatchSurface):   │
                     │   • OnFrame, OnSimTick                    │
                     │   • RecordSystem, RecordPatchedVanilla    │
                     │   • RecordPhase                           │
@@ -79,7 +84,7 @@ VanillaProfiler (assembly)
                     └──────────────────┘  └──────────────────┘
 ```
 
-`Profiler` is an **instance** owned by `VanillaProfilerMod` and reachable via the static `ProfilerHost.TryGet()`. The hot-path surface called from Harmony patches and ECS systems is formalised in `IProfilerHotPath`; `MainThreadGuard` asserts the main-thread contract on those entries. `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
+`Profiler` is an **instance** owned by `VanillaProfilerMod`. `ProfilerHost` exposes it only through two interfaces: `ProfilerHost.TryGetPatchSurface()` returns `IProfilerPatchSurface` for Harmony patches and ECS counter systems; `ProfilerHost.TryGetReadSurface()` returns `IProfilerReadSurface` for overlay, export, lifecycle and logging. The concrete `Profiler` type is not reachable through the host. `MainThreadGuard` asserts the main-thread contract on the patch surface; `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
 
 ## Key contracts
 
@@ -143,9 +148,13 @@ The bottleneck logic uses **average phase ms per call** — derived from exact p
 
 Cold-path fan-out to `IReportSink[]`. Wraps each sink in its own `try/catch` so a misbehaving sink (disk full, AV scan locking the file) cannot abort delivery to the others. Failures are logged at `Warn` level via `VanillaProfilerMod.Log`. `Profiler.Report` calls `ReportDispatcher.WriteReport`; system messages route through `ReportDispatcher.WriteSystem`.
 
-### `ProfilerSettingsSnapshot`
+### `ProfilerSettings` and `ProfilerSettingsSnapshot`
 
-Immutable point-in-time settings view that wraps a `ProfilerSettings` clone. Constructed via `ProfilerSettingsSnapshot.From(SettingsStore.Current)` (or read via `SettingsStore.Snapshot`). Runtime services (`Profiler`, `MetricsAggregator`, `MemoryHistory`, `ProfilerOverlay`) accept a `Func<ProfilerSettingsSnapshot>` accessor instead of reading `SettingsStore.Current` ad-hoc, so settings reads stay explicit and consistent across a frame. Adding a persisted setting only requires editing `ProfilerSettings`; the snapshot picks it up via `MemberwiseClone`.
+`ProfilerSettings` is **immutable** — every field is `{ get; }`, the constructor takes one argument per field with defaults, and edits go through `.With(...)` returning a new instance. `Normalize()` returns a clamped copy without mutating; `Normalize(out bool changed)` is used at load time to migrate legacy values.
+
+`ProfilerSettingsSnapshot` is the point-in-time view passed through hot/cold boundaries. Because `ProfilerSettings` is now immutable the snapshot just holds a reference (no clone needed). Read it via `SettingsStore.Snapshot`; runtime services receive a `Func<ProfilerSettingsSnapshot>` accessor at construction so settings reads stay explicit and consistent across a frame.
+
+`SettingsStore` no longer exposes a mutable `Current` field. The only public read is `Snapshot`; the only writes are `SettingsStore.Apply(ProfilerSettings)` (replace wholesale) and `SettingsStore.Update(Func<ProfilerSettings, ProfilerSettings>)` (functional update). JSON persistence uses a private `SerializedSettings` DTO so the immutable shape doesn't constrain the serializer.
 
 ### `OverlayState`
 
@@ -178,7 +187,7 @@ Shared text-section builders used by both the periodic `LogFileSink` writes and 
 
 The mod follows a **main-thread measurement** rule rather than scattering locks everywhere:
 
-- **Hot-path surface is `IProfilerHotPath`.** Implemented by `Profiler`. New hot-path methods belong on the interface so the contract stays explicit and the implementations cannot drift.
+- **Patch surface is `IProfilerPatchSurface`, read/control surface is `IProfilerReadSurface`.** Both implemented by `Profiler`; `ProfilerHost` only exposes the interfaces, not the concrete type, so a Harmony patch cannot reach `LastSnapshot` and an overlay cannot reach `RecordSystem`. New patch-callable methods belong on `IProfilerPatchSurface`; new overlay/export/lifecycle access goes on `IProfilerReadSurface`.
 - **`Profiler.RecordSystem`** is invoked from `SystemBase.Update` Postfix on the Unity main thread. It records into `MetricsAggregator` without locking.
 - **Measurement state is main-thread only:**
   - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread by Unity contract.
@@ -192,7 +201,7 @@ The mod follows a **main-thread measurement** rule rather than scattering locks 
 - **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so a stale Harmony callback landing after `Mod.OnDispose` no-ops cleanly.
 - **Log output has its own lock.** `LogFileSink` serializes file IO because system messages can be routed from defensive off-thread diagnostics.
 - **`ReportDispatcher`** is invoked only from `Profiler.Report` and `Profiler.WriteSystem`, both main-thread; per-sink `try/catch` makes one bad sink isolated rather than fatal.
-- **`ProfilerHost.TryGet()`** does a single `Volatile.Read` of the instance reference. Callers must capture the result into a local variable before use; never write `ProfilerHost.IsAvailable` followed by `ProfilerHost.Current` — that's a TOCTOU bug.
+- **`ProfilerHost.TryGetReadSurface()` / `TryGetPatchSurface()`** each do a single `Volatile.Read`. Callers must capture the result into a local variable before use. `ProfilerHost.IsAvailable` is a single-shot existence gate (used by `CityContextSystem` to skip work when no profiler is alive); never pair it with a subsequent `TryGet*Surface()` in the same control flow — that's a TOCTOU race.
 
 ## What this mod intentionally does NOT do
 
