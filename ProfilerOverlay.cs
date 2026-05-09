@@ -18,6 +18,7 @@ namespace VanillaProfiler
         private const float WIDTH = 440f;
         private const int MAIN_WINDOW_ID = 0xC1F1C0;
         private const float MIN_VISIBLE_PX = 80f;
+        private const float MAIN_HEADER_HEIGHT = OverlayPanel.PAD + OverlayPanel.LINE_H * 2f + 8f;
 
         // Throttle persistence of drag positions so a held-mouse-move doesn't write
         // the JSON file on every frame.
@@ -95,6 +96,8 @@ namespace VanillaProfiler
         {
             var s = SettingsStore.Snapshot.Settings;
             var nextAnchor = (Anchor)Mathf.Clamp(s.Anchor, 0, 3);
+            if (s.PanelX < 0f || s.PanelY < 0f)
+                m_PanelPosition.Load();
             if (nextAnchor != m_State.Anchor)
             {
                 // Choosing an anchor is an explicit snap request. If the panel had a
@@ -188,7 +191,7 @@ namespace VanillaProfiler
         {
             float contentHeight = mode.MeasureHeight(snapshot);
             if (contentHeight <= 0) return;
-            float naturalHeight = contentHeight + MainPanelButtons.BLOCK_HEIGHT;
+            float naturalHeight = MAIN_HEADER_HEIGHT + contentHeight + MainPanelButtons.BLOCK_HEIGHT;
             float totalHeight = Mathf.Min(naturalHeight, PanelLayout.MaxWindowHeight(scale));
 
             // Layout: position from drag (manual) or from anchor preset; height
@@ -210,22 +213,24 @@ namespace VanillaProfiler
             var panelRect = m_PanelPosition.Rect;
             var rect = new Rect(0f, 0f, panelRect.width, panelRect.height);
             OverlayPanel.DrawFrame(m_Theme, rect);
+            DrawMainHeader(mode, rect.width);
 
             float contentHeight = mode.MeasureHeight(snapshot);
-            float viewportHeight = Mathf.Max(OverlayPanel.LINE_H, rect.height - MainPanelButtons.BLOCK_HEIGHT);
+            float viewportHeight = Mathf.Max(OverlayPanel.LINE_H,
+                rect.height - MAIN_HEADER_HEIGHT - MainPanelButtons.BLOCK_HEIGHT);
             bool scrolling = contentHeight > viewportHeight;
             if (scrolling)
             {
-                var viewport = new Rect(0f, 0f, rect.width, viewportHeight);
+                var viewport = new Rect(0f, MAIN_HEADER_HEIGHT, rect.width, viewportHeight);
                 var view = new Rect(0f, 0f, rect.width - 18f, contentHeight);
                 m_MainScroll = GUI.BeginScrollView(viewport, m_MainScroll, view, false, true);
-                DrawModeContent(profiler, snapshot, health, mode, settings, view.width);
+                DrawModeContent(profiler, snapshot, health, mode, settings, view.width, OverlayPanel.PAD);
                 GUI.EndScrollView();
             }
             else
             {
                 m_MainScroll = Vector2.zero;
-                DrawModeContent(profiler, snapshot, health, mode, settings, rect.width);
+                DrawModeContent(profiler, snapshot, health, mode, settings, rect.width, MAIN_HEADER_HEIGHT + OverlayPanel.PAD);
             }
 
             SetModeIndex(m_Buttons.Draw(rect, m_State.ModeIndex, m_State.Anchor));
@@ -237,8 +242,7 @@ namespace VanillaProfiler
             GUI.DragWindow(dragHandle);
         }
 
-        private void DrawModeContent(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
-            IOverlayMode mode, ProfilerSettingsSnapshot settings, float width)
+        private void DrawMainHeader(IOverlayMode mode, float width)
         {
             var ctx = new DrawContext(
                 m_Theme,
@@ -249,8 +253,27 @@ namespace VanillaProfiler
                 ModeIndex = m_State.ModeIndex,
                 ModeCount = m_Modes.Length,
                 NextModeName = m_Modes[(m_State.ModeIndex + 1) % m_Modes.Length].DisplayName,
+            };
+            string title = mode is RecommendationsMode
+                ? "RECOMMENDATIONS"
+                : mode.DisplayName.ToUpperInvariant();
+            OverlayPanel.DrawHeaderWithCycle(ctx, $"VANILLA PROFILER  >  {title}");
+        }
+
+        private void DrawModeContent(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
+            IOverlayMode mode, ProfilerSettingsSnapshot settings, float width, float y)
+        {
+            var ctx = new DrawContext(
+                m_Theme,
+                OverlayPanel.PAD,
+                y,
+                width - OverlayPanel.PAD * 2)
+            {
+                ModeIndex = m_State.ModeIndex,
+                ModeCount = m_Modes.Length,
+                NextModeName = m_Modes[(m_State.ModeIndex + 1) % m_Modes.Length].DisplayName,
                 SparklineWidth = settings.Settings.SparklineWidth,
-                FpsSparkline = profiler.FpsSparkline.Render(settings.Settings.SparklineWidth),
+                FpsSparkline = profiler.FpsSparklineText(settings.Settings.SparklineWidth),
             };
 
             // Contract: this method is only reached when LifecycleState == Active,
@@ -272,7 +295,7 @@ namespace VanillaProfiler
             m_MainScroll = Vector2.zero;
             if (m_Modes[m_State.ModeIndex] is RecommendationsMode recommendationsMode)
             {
-                ProfilerHost.TryGetReadSurface()?.GraphicsSettings.Invalidate();
+                ProfilerHost.TryGetReadSurface()?.InvalidateRecommendationsCache();
                 recommendationsMode.InvalidateCache();
             }
             // Hide-mode safety net: when the hint pill is disabled the screen
@@ -309,10 +332,10 @@ namespace VanillaProfiler
 
         private void DoToggleScreenshots()
         {
-            var spikeScreenshots = ProfilerHost.TryGetReadSurface()?.SpikeScreenshots;
-            bool next = !(spikeScreenshots?.Enabled ?? SettingsStore.Snapshot.Settings.SpikeScreenshots);
-            if (spikeScreenshots != null)
-                spikeScreenshots.Enabled = next;
+            var profiler = ProfilerHost.TryGetReadSurface();
+            bool next = !SettingsStore.Snapshot.Settings.SpikeScreenshots;
+            if (profiler != null)
+                profiler.SetSpikeScreenshotsEnabled(next);
             else
                 SettingsStore.Update(settings => settings.With(spikeScreenshots: next));
             m_Settings.SyncSpikeScreenshotsFromHotkey(next);

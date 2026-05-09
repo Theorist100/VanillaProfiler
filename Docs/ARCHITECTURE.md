@@ -22,8 +22,10 @@ VanillaProfiler (assembly)
 │                               • IProfilerPatchSurface — narrow surface for Harmony patches and ECS counter systems
 │                                 (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase)
 │                               • IProfilerReadSurface — overlay/export/lifecycle/log surface (LastSnapshot,
-│                                 LastHealth, MemoryHistory, FpsSparkline, SpikeScreenshots, GraphicsSettings,
-│                                 Recommendations, LifecycleState, ForceReport, SetGameLoaded, BeginLoading, LogInfo/Warn/Error)
+│                                 LastHealth, LatestMemoryHistory, GraphicsSettings state, LifecycleState,
+│                                 SpikeScreenshotsCaptured, FpsSparklineText, BuildRecommendations,
+│                                 SetSpikeScreenshotsEnabled, InvalidateRecommendationsCache, ForceReport,
+│                                 SetGameLoaded, BeginLoading, LogInfo/Warn/Error)
 ├── ProfilerHost.cs             Static handle — Volatile.Read returning IProfilerPatchSurface or IProfilerReadSurface; the concrete Profiler type is not exposed.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic. Holds OverlayState for navigation.
 ├── ReportScheduler.cs          Owns frame-to-frame timing and report cadence; answers "is a report due now?".
@@ -88,6 +90,8 @@ VanillaProfiler (assembly)
 ```
 
 `Profiler` is an **instance** owned by `VanillaProfilerMod`. `ProfilerHost` exposes it only through two interfaces: `ProfilerHost.TryGetPatchSurface()` returns `IProfilerPatchSurface` for Harmony patches and ECS counter systems; `ProfilerHost.TryGetReadSurface()` returns `IProfilerReadSurface` for overlay, export, lifecycle and logging. The concrete `Profiler` type is not reachable through the host. `MainThreadGuard` asserts the main-thread contract on the patch surface; `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
+
+`IProfilerReadSurface` is a DTO/command boundary. It does not return live mutable services such as `MemoryHistory`, `FpsSparkline`, `SpikeScreenshot`, `GraphicsSettingsProbe`, or `RecommendationEngine`; consumers receive snapshots (`LatestMemoryHistory`, `GraphicsSettings`) or invoke narrow commands (`FpsSparklineText`, `BuildRecommendations`, `SetSpikeScreenshotsEnabled`, `InvalidateRecommendationsCache`).
 
 `ProfilerSessionState` is the single lifecycle/read-state source. `Mod.OnLoad` calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` immediately after registering the profiler, so hot-reloading the mod while a city is already active enters the same settling path as a normal load-complete callback. City load/unload, loading start and dispose all route through `Profiler.ResetForBoundary(SessionBoundary)`; that reset clears stale public snapshots, city context, graphics/replacement caches, spike screenshot state, memory history and the scheduler. `MemorySampler.ResetSession()` recreates Unity `ProfilerRecorder` instances at these boundaries so CPU/GPU timing windows do not bleed across menu/loading/previous-city samples.
 
@@ -168,6 +172,8 @@ Cold-path fan-out to `IReportSink[]`. Wraps each sink in its own `try/catch` so 
 
 Mutable UI navigation state (`ModeIndex`, `Anchor`) lifted out of `ProfilerOverlay` so drawing, persistence, and navigation each have a single home. `ProfilerOverlay` owns the instance, holds it for the session, and routes hotkey/button events to `SetMode` / `SetAnchor` / `CycleMode` / `CycleAnchor`.
 
+The main overlay header is drawn outside the scroll view, so long Details/Engine/Recommendations bodies scroll under a stable title/drag band. Reset Defaults writes `PanelX = -1` / `PanelY = -1`; `ProfilerOverlay.ApplyLiveSettings()` reloads panel positioning so the next layout returns to the selected anchor preset instead of preserving a stale manual drag.
+
 ### `ProfilerRecorderFactory` & `ProfilerRecorderSamples`
 
 `MemorySampler` exposes a wide set of Unity `ProfilerRecorder` markers. Two pieces keep that path honest and allocation-free:
@@ -195,7 +201,7 @@ Shared text-section builders used by both the periodic `LogFileSink` writes and 
 
 The mod follows a **main-thread measurement** rule rather than scattering locks everywhere:
 
-- **Patch surface is `IProfilerPatchSurface`, read/control surface is `IProfilerReadSurface`.** Both implemented by `Profiler`; `ProfilerHost` only exposes the interfaces, not the concrete type, so a Harmony patch cannot reach `LastSnapshot` and an overlay cannot reach `RecordSystem`. New patch-callable methods belong on `IProfilerPatchSurface`; new overlay/export/lifecycle access goes on `IProfilerReadSurface`.
+- **Patch surface is `IProfilerPatchSurface`, read/control surface is `IProfilerReadSurface`.** Both implemented by `Profiler`; `ProfilerHost` only exposes the interfaces, not the concrete type, so a Harmony patch cannot reach `LastSnapshot` and an overlay cannot reach `RecordSystem`. New patch-callable methods belong on `IProfilerPatchSurface`; new overlay/export/lifecycle access goes on `IProfilerReadSurface` as DTOs or narrow commands, not live mutable helper instances.
 - **`Profiler.RecordSystem`** is invoked from `SystemBase.Update` Postfix on the Unity main thread. It records into `MetricsAggregator` without locking.
 - **Measurement state is main-thread only:**
   - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread by Unity contract.

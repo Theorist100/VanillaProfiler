@@ -14,9 +14,9 @@ namespace VanillaProfiler.Overlay.Modes
 
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
-            // header (title + breadcrumb), 4 data rows (Status/Cause/FPS/Memory),
-            // a permanent Profiler-self row, and an optional Likely-mod row.
-            int lines = 7;
+            // 4 data rows (Status/Cause/FPS/Memory), a permanent Profiler-self row,
+            // and an optional Likely-mod row. The fixed header is drawn by ProfilerOverlay.
+            int lines = 5;
             if (!string.IsNullOrEmpty(TopMod(snapshot))) lines++;
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
@@ -26,8 +26,6 @@ namespace VanillaProfiler.Overlay.Modes
             // Contract: ProfilerOverlay only renders modes when IsSettling=false →
             // snapshot and health are non-null here. Pre-game / settling states are
             // shown as overlay badges instead of empty mode panels.
-            OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  STATUS");
-
             OverlayPanel.DrawMetricRow(ctx, "Status:", Label(health.Overall),
                 ctx.Theme.StyleForHealth(health.Overall));
             OverlayPanel.DrawMetricRow(ctx, "Cause:", Cause(health), ctx.Theme.BodyStyle);

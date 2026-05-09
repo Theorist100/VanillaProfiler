@@ -18,7 +18,7 @@ The flow is always: collect → classify → render. Pick where you plug in:
 Hook into `Profiler.OnFrame` (called from `UpdateSystemPatch` Rendering phase, main thread). Frame timing and report cadence are owned by `ReportScheduler` — do not duplicate that logic. Add an instance accumulator field on `Profiler` directly — no lock needed because `OnFrame` is main-thread only. Drain and reset it in `Profiler.Report()`. Add a field to `OverlaySnapshot`, fill it in `ReportBuilder.Build`, render it in an `IOverlayMode` implementation.
 
 ### Per-system metric (main-thread)
-Add a method on `MetricsAggregator` and expose it via a delegating method on `Profiler`. If the new method is called from a Harmony patch or ECS system, also add it to `IProfilerPatchSurface` so the contract stays explicit; if it is called from overlay/export/lifecycle code, add it to `IProfilerReadSurface` instead. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
+Add a method on `MetricsAggregator` and expose it via a delegating method on `Profiler`. If the new method is called from a Harmony patch or ECS system, also add it to `IProfilerPatchSurface` so the contract stays explicit; if it is called from overlay/export/lifecycle code, add it to `IProfilerReadSurface` as a DTO or narrow command instead of returning the live helper instance. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
 
 ### Per-report metric
 If you only need a value once per report (e.g. a rare query), add it directly inside `Profiler.Report()` after `MetricsAggregator.Drain()`. Main-thread context — touch instance fields freely.
@@ -80,7 +80,7 @@ Signature touches: 1 px gold border on all four sides, 3 px gold accent strip on
 
 ## Thread safety
 
-Profiler measurement state is **main-thread only**. The patch surface (`IProfilerPatchSurface`) called from Harmony patches and ECS counter systems exposes `IsVanillaSystemPatched`, `OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`; the read/control surface (`IProfilerReadSurface`) used by overlay/export/lifecycle is separate. `ProfilerHost` only exposes the live `Profiler` through these two interfaces — the concrete type cannot leak across patch/read boundaries. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
+Profiler measurement state is **main-thread only**. The patch surface (`IProfilerPatchSurface`) called from Harmony patches and ECS counter systems exposes `IsVanillaSystemPatched`, `OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`; the read/control surface (`IProfilerReadSurface`) used by overlay/export/lifecycle is separate and returns DTOs/commands rather than live mutable services. `ProfilerHost` only exposes the live `Profiler` through these two interfaces — the concrete type cannot leak across patch/read boundaries. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
 
 Everything else is **main-thread only**:
 - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread (rendering always is)

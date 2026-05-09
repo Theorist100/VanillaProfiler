@@ -12,13 +12,13 @@ namespace VanillaProfiler.Diagnostics
     /// </summary>
     public sealed class GraphicsSettingsState
     {
-        public bool? IsFullscreenWindowed;
-        public bool? MotionBlurEnabled;
-        public bool? DepthOfFieldEnabled;
-        public bool? VolumetricsEnabled;
-        public float? LevelOfDetail;     // 0.10 - 1.00; Paradox recommends 0.75
-        public int? MaxFrameLatency;     // 1-3, CS2's "pre-rendered frames" setting
-        public bool ProbeAttempted;
+        public bool? IsFullscreenWindowed { get; internal set; }
+        public bool? MotionBlurEnabled { get; internal set; }
+        public bool? DepthOfFieldEnabled { get; internal set; }
+        public bool? VolumetricsEnabled { get; internal set; }
+        public float? LevelOfDetail { get; internal set; }     // 0.10 - 1.00; Paradox recommends 0.75
+        public int? MaxFrameLatency { get; internal set; }     // 1-3, CS2's "pre-rendered frames" setting
+        public bool ProbeAttempted { get; internal set; }
     }
 
     /// <summary>

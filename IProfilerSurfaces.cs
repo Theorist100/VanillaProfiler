@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler
@@ -27,13 +28,15 @@ namespace VanillaProfiler
     {
         OverlaySnapshot? LastSnapshot { get; }
         HealthReport? LastHealth { get; }
-        MemoryHistory MemoryHistory { get; }
-        FpsSparkline FpsSparkline { get; }
-        SpikeScreenshot SpikeScreenshots { get; }
-        GraphicsSettingsProbe GraphicsSettings { get; }
-        RecommendationEngine Recommendations { get; }
+        MemoryHistorySnapshot LatestMemoryHistory { get; }
+        GraphicsSettingsState GraphicsSettings { get; }
         ProfilerLifecycleState LifecycleState { get; }
+        int SpikeScreenshotsCaptured { get; }
 
+        string FpsSparklineText(int width);
+        IReadOnlyList<Recommendation> BuildRecommendations(HealthReport health, OverlaySnapshot snapshot);
+        void SetSpikeScreenshotsEnabled(bool enabled);
+        void InvalidateRecommendationsCache();
         void ForceReport();
         void SetGameLoaded(bool gameLoaded);
         void BeginLoading(bool loadsCity);

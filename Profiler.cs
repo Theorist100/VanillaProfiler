@@ -52,11 +52,12 @@ namespace VanillaProfiler
 
         public OverlaySnapshot? LastSnapshot => m_Session.LastSnapshot;
         public HealthReport? LastHealth => m_Session.LastHealth;
-        public MemoryHistory MemoryHistory { get; }
-        public FpsSparkline FpsSparkline { get; } = new();
-        public SpikeScreenshot SpikeScreenshots => m_SpikeScreenshots;
-        public GraphicsSettingsProbe GraphicsSettings => m_GraphicsSettings;
-        public RecommendationEngine Recommendations { get; }
+        private MemoryHistory MemoryHistory { get; }
+        private FpsSparkline FpsSparkline { get; } = new();
+        public MemoryHistorySnapshot LatestMemoryHistory => MemoryHistory.ToSnapshot();
+        public GraphicsSettingsState GraphicsSettings => m_GraphicsSettings.State;
+        public int SpikeScreenshotsCaptured => m_SpikeScreenshots.TotalCaptured;
+        private RecommendationEngine Recommendations { get; }
 
         public ProfilerLifecycleState LifecycleState => m_Session.LifecycleState;
         public bool IsGameLoaded => m_Session.IsGameLoaded;
@@ -65,6 +66,27 @@ namespace VanillaProfiler
         public bool ShouldProfileVanillaSystems => m_Settings().Settings.ProfileVanillaSystems;
         public bool IsVanillaSystemPatched(Type type)
             => Volatile.Read(ref m_Replacements).IsPatched(type);
+
+        public string FpsSparklineText(int width) => FpsSparkline.Render(width);
+
+        public System.Collections.Generic.IReadOnlyList<Recommendation> BuildRecommendations(
+            HealthReport health,
+            OverlaySnapshot snapshot)
+            => Recommendations.Build(health, snapshot);
+
+        public void SetSpikeScreenshotsEnabled(bool enabled)
+        {
+            MainThreadGuard.AssertMainThread(nameof(SetSpikeScreenshotsEnabled));
+            if (m_Disposed) return;
+            m_SpikeScreenshots.Enabled = enabled;
+        }
+
+        public void InvalidateRecommendationsCache()
+        {
+            MainThreadGuard.AssertMainThread(nameof(InvalidateRecommendationsCache));
+            if (m_Disposed) return;
+            m_GraphicsSettings.Invalidate();
+        }
 
         private float ReportInterval => m_Settings().Settings.ReportIntervalSec;
 

@@ -156,7 +156,7 @@ namespace VanillaProfiler.Diagnostics
         private static void AppendRecommendations(StringBuilder sb, OverlaySnapshot? snap, HealthReport? health)
         {
             if (snap == null || health == null) return;
-            var recommendations = ProfilerHost.TryGetReadSurface()?.Recommendations.Build(health, snap)
+            var recommendations = ProfilerHost.TryGetReadSurface()?.BuildRecommendations(health, snap)
                 ?? Array.Empty<Recommendation>();
             if (recommendations.Count == 0) return;
 

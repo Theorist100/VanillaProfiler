@@ -14,10 +14,11 @@ namespace VanillaProfiler.Overlay.Modes
 
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
-            // header (2) + Problem (1) + spacer (1) + LIKELY CAUSE section (1)
+            // Problem (1) + spacer (1) + LIKELY CAUSE section (1)
             // + cause lines (worst case 2) + WHAT TO DO section (1) + advice (worst 4).
             // SUSPECTED MOD section (header + body = 2 lines) only when a mod stands out.
-            int lines = 12;
+            // The fixed header is drawn by ProfilerOverlay.
+            int lines = 10;
             if (!string.IsNullOrEmpty(TopMod(snapshot))) lines += 2;
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
@@ -26,8 +27,6 @@ namespace VanillaProfiler.Overlay.Modes
         {
             // Contract: snapshot and health are non-null here (overlay's settling
             // badge handles the warmup phase). No defensive null branch.
-            OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  DIAGNOSIS");
-
             OverlayPanel.DrawLine(ctx, $"Problem: {Problem(health)}", ctx.Theme.StyleForHealth(health.Overall));
             OverlayPanel.DrawLine(ctx, "", ctx.Theme.BodyStyle);
 

@@ -32,8 +32,8 @@ namespace VanillaProfiler.Overlay.Modes
         {
             var picks = Picks(snapshot, LastHealth());
             int lines = picks.Count == 0
-                ? 2 + 1 + 1               // header + ALL CLEAR + body
-                : 2 + 1 + (picks.Count * 3) + Math.Max(0, picks.Count - 1);
+                ? 1 + 1               // ALL CLEAR + body
+                : 1 + (picks.Count * 3) + Math.Max(0, picks.Count - 1);
             return OverlayPanel.PAD * 2 + OverlayPanel.LINE_H * lines + 12f;
         }
 
@@ -45,8 +45,6 @@ namespace VanillaProfiler.Overlay.Modes
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {
-            OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  RECOMMENDATIONS");
-
             var picks = Picks(snapshot, health);
             if (picks.Count == 0)
             {
@@ -74,7 +72,7 @@ namespace VanillaProfiler.Overlay.Modes
             m_CachedSnapshot = snapshot;
             m_CachedHealth = health;
             m_CachedAtRealtime = Time.realtimeSinceStartup;
-            m_CachedPicks = ProfilerHost.TryGetReadSurface()?.Recommendations.Build(health, snapshot)
+            m_CachedPicks = ProfilerHost.TryGetReadSurface()?.BuildRecommendations(health, snapshot)
                 ?? Array.Empty<Recommendation>();
             return m_CachedPicks;
         }

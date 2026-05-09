@@ -17,6 +17,7 @@
 - Top Mods/Systems now report self-cost (exclusive main-thread time) instead of inclusive nested `SystemBase.Update` time. Numbers may be lower than previous builds; that is expected because nested systems are no longer double-counted.
 - System tables in `VanillaProfiler.log` now include both `SELF` and `INCL` columns. Patched-vanilla diagnostics keep using total Update ms because the mod-prefix/vanilla-original split is not measurable.
 - Patched-vanilla detection now uses a deduplicated snapshot refreshed at lifecycle boundaries and at the start of each report window, so hot-path routing and report output read the same state.
+- Overlay read access now uses DTOs and commands instead of exposing live profiler internals. Long overlay bodies scroll under a fixed header, and Reset Defaults returns manual panel positions to the anchor preset.
 
 ### Internal
 

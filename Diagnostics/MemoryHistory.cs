@@ -76,6 +76,21 @@ namespace VanillaProfiler.Diagnostics
             ClearComputed();
         }
 
+        public MemoryHistorySnapshot ToSnapshot()
+        {
+            if (m_Samples.Count == 0)
+                return MemoryHistorySnapshot.Empty;
+
+            var points = new MemorySamplePoint[m_Samples.Count];
+            for (int i = 0; i < m_Samples.Count; i++)
+            {
+                var sample = m_Samples[i];
+                points[i] = new MemorySamplePoint(sample.Bytes, sample.Seconds);
+            }
+
+            return new MemoryHistorySnapshot(WindowSeconds, GrowthMBperSec, LeakSuspected, points);
+        }
+
         private void Recompute()
         {
             int n = m_Samples.Count;

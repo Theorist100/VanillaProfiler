@@ -21,13 +21,14 @@ namespace VanillaProfiler.Overlay.Modes
 
         public float MeasureHeight(OverlaySnapshot snapshot)
         {
-            // Header + breadcrumb (2 lines via DrawHeaderWithCycle pattern). Then sections:
-            //   Frame timing (4 rows: Main/Render/GPU/PresentWait)         — always shown
+            // Sections:
+            //   Frame timing (4 rows: Main/Render/GPU/PresentWait)         - always shown
             //   Render counts (3 rows: DrawCalls+SetPass / Tris+Verts / Shadow casters)
-            //   GPU memory (1-2 rows: Buffers, RT)                          — conditional
-            //   GC (1 row)                                                  — conditional
-            //   Process RSS (1 row)                                         — conditional
-            int lines = 2; // header + breadcrumb (one line each via OverlayPanel)
+            //   GPU memory (1-2 rows: Buffers, RT)                         - conditional
+            //   GC (1 row)                                                 - conditional
+            //   Process RSS (1 row)                                        - conditional
+            // The fixed header is drawn by ProfilerOverlay.
+            int lines = 0;
             // Always render the frame-timing block so the screen has stable height during
             // settling — empty rows are clearer than a panel that resizes every report.
             lines += 1 + 4; // section title + 4 rows
@@ -43,8 +44,6 @@ namespace VanillaProfiler.Overlay.Modes
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {
-            OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  ENGINE");
-
             // Frame timing — direct readouts of Unity's CPU/GPU thread markers so the
             // player sees which stage of the pipeline is gating the frame. PresentWait is
             // the headline GPU-bound signal: high here means CPU is idle waiting on GPU.

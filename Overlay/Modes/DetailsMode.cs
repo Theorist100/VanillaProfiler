@@ -27,9 +27,10 @@ namespace VanillaProfiler.Overlay.Modes
             // exists (settling badge covers the pre-snapshot phase). The collapsed
             // null-snapshot fallback is therefore unreachable; modelling sizes only
             // for the data path keeps the contract explicit.
-            // Header title + breadcrumb, fps, sparkline, sim, gc, mem, bottleneck.
+            // Fps, sparkline, sim, mem growth, memory used, bottleneck.
+            // The fixed header is drawn by ProfilerOverlay.
             // City is conditional and should not reserve a blank row before data arrives.
-            int lines = 8;
+            int lines = 6;
             if (CityContext.HasData) lines++;
             if (snapshot.GfxUsedAvailable || snapshot.AudioUsedAvailable) lines++;
             if (HasItems(snapshot.TopMods)) lines += 1 + snapshot.TopMods.Count;
@@ -47,8 +48,6 @@ namespace VanillaProfiler.Overlay.Modes
 
         public void Draw(DrawContext ctx, OverlaySnapshot snapshot, HealthReport health)
         {
-            OverlayPanel.DrawHeaderWithCycle(ctx, "VANILLA PROFILER  >  DETAILS");
-
             OverlayPanel.DrawLine(ctx,
                 $"FPS:           {snapshot.AvgFps,5:F0} avg / {snapshot.MinFps,4:F0} min   (frame {snapshot.AvgFrameMs:F1} / {snapshot.MaxFrameMs:F1} ms)",
                 ctx.Theme.BodyStyle);
