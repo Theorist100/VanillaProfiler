@@ -118,12 +118,12 @@ namespace VanillaProfiler
             // Profile only the actual gameplay session. Editor mode loads a similar
             // ECS world but the player wouldn't be looking at gameplay performance —
             // it would just clutter the editor with our overlay.
-            ProfilerHost.TryGet()?.SetGameLoaded(mode == GameMode.Game);
+            ProfilerHost.TryGetReadSurface()?.SetGameLoaded(mode == GameMode.Game);
         }
 
         private static void OnGamePreload(Purpose purpose, GameMode mode)
         {
-            ProfilerHost.TryGet()?.BeginLoading(mode == GameMode.Game);
+            ProfilerHost.TryGetReadSurface()?.BeginLoading(mode == GameMode.Game);
         }
 
         private void Cleanup(bool logDispose)

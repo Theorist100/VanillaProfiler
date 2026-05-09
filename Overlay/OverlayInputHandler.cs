@@ -22,7 +22,7 @@ namespace VanillaProfiler.Overlay
         {
             if (!CtrlHeld) return;
 
-            if (SettingsStore.Current.SettingsPanelHotkey && Input.GetKeyDown(KeyCode.F8))
+            if (SettingsStore.Snapshot.Settings.SettingsPanelHotkey && Input.GetKeyDown(KeyCode.F8))
             {
                 OnToggleSettings?.Invoke(this, EventArgs.Empty);
                 return;

@@ -44,7 +44,7 @@ namespace VanillaProfiler.Diagnostics
         private static string BuildReport()
         {
             var sb = new StringBuilder(8192);
-            var profiler = ProfilerHost.TryGet();
+            var profiler = ProfilerHost.TryGetReadSurface();
             var snap = profiler?.LastSnapshot;
             var health = profiler?.LastHealth;
 
@@ -155,7 +155,8 @@ namespace VanillaProfiler.Diagnostics
         private static void AppendRecommendations(StringBuilder sb, OverlaySnapshot? snap, HealthReport? health)
         {
             if (snap == null || health == null) return;
-            var recommendations = RecommendationEngine.Build(health, snap);
+            var recommendations = ProfilerHost.TryGetReadSurface()?.Recommendations.Build(health, snap)
+                ?? Array.Empty<Recommendation>();
             if (recommendations.Count == 0) return;
 
             sb.AppendLine("--- Recommendations (why they appeared) ---");

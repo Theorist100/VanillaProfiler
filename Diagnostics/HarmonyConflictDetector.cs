@@ -14,7 +14,7 @@ namespace VanillaProfiler.Diagnostics
     /// </summary>
     public static class HarmonyConflictDetector
     {
-        public static void ScanAndLog(Profiler profiler)
+        public static void ScanAndLog(IProfilerReadSurface profiler)
         {
             if (profiler == null) return;
             try

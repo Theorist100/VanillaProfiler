@@ -23,7 +23,7 @@ namespace VanillaProfiler
 
         private static void Dispatch(SystemLogLevel level, string msg)
         {
-            var p = ProfilerHost.TryGet();
+            var p = ProfilerHost.TryGetReadSurface();
             if (p != null)
             {
                 Route(p, level, msg);
@@ -43,7 +43,7 @@ namespace VanillaProfiler
         /// <summary>Replay every buffered message into the live Profiler. Call once after Register.</summary>
         public static void Flush()
         {
-            var p = ProfilerHost.TryGet();
+            var p = ProfilerHost.TryGetReadSurface();
             if (p == null) return;
 
             (SystemLogLevel, string)[] drained;
@@ -64,7 +64,7 @@ namespace VanillaProfiler
             }
         }
 
-        private static void Route(Profiler p, SystemLogLevel level, string msg)
+        private static void Route(IProfilerReadSurface p, SystemLogLevel level, string msg)
         {
             switch (level)
             {

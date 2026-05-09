@@ -8,9 +8,9 @@ namespace VanillaProfiler.Overlay
 {
     /// <summary>
     /// Ctrl+F8 settings panel. Uses a draft-then-apply model:
-    ///   - Open  → snapshot SettingsStore.Current into m_Draft
+    ///   - Open  → snapshot SettingsStore.Snapshot.Settings into m_Draft
     ///   - Edit  → mutate m_Draft only (the live settings stay untouched)
-    ///   - Apply → m_Draft → SettingsStore.Current, persist once, fire OnApplied
+    ///   - Apply → m_Draft → SettingsStore.Apply, persist once, fire OnApplied
     ///   - Reset → replace m_Draft with defaults (live settings unaffected until Apply)
     ///   - Close → discard m_Draft
     /// Layout helpers live in PanelLayout / SettingsWidgets / SettingsDraft so this
@@ -42,20 +42,12 @@ namespace VanillaProfiler.Overlay
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
 
-        private ProfilerSettings? m_Draft;
+        private SettingsDraft? m_Draft;
         private string m_IntervalText = string.Empty;
         private string m_SparklineWidthText = string.Empty;
         private string m_SpikeThresholdText = string.Empty;
         private string? m_ErrorText;
-        private bool m_DirtyReportInterval;
-        private bool m_DirtyDefaultMode;
-        private bool m_DirtyAnchor;
-        private bool m_DirtySparklineWidth;
-        private bool m_DirtySpikeScreenshots;
-        private bool m_DirtySpikeThreshold;
-        private bool m_DirtyUiScale;
-        private bool m_DirtyProfileVanilla;
-        private bool m_DirtyHideHintBadge;
+        private readonly SettingsDirtyState m_Dirty = new();
 
         // Draggable window state. Rect is in logical (pre-GUI.matrix) coordinates.
         private Rect m_WindowRect;
@@ -73,14 +65,9 @@ namespace VanillaProfiler.Overlay
         public void SyncLiveSettings()
         {
             if (m_Draft == null) return;
-            var live = SettingsStore.Current;
+            var live = SettingsStore.Snapshot.Settings;
 
-            if (!m_DirtyAnchor)
-                m_Draft.Anchor = live.Anchor;
-            if (!m_DirtySpikeScreenshots)
-                m_Draft.SpikeScreenshots = live.SpikeScreenshots;
-            if (!m_DirtyProfileVanilla)
-                m_Draft.ProfileVanillaSystems = live.ProfileVanillaSystems;
+            m_Dirty.SyncLiveSettings(m_Draft, live);
 
             if (m_PosDirty && Time.realtimeSinceStartup - m_PosDirtyAt >= SAVE_DEBOUNCE_S)
                 FlushPendingPosition();
@@ -90,14 +77,14 @@ namespace VanillaProfiler.Overlay
         {
             if (m_Draft == null) return;
             m_Draft.Anchor = anchor;
-            m_DirtyAnchor = false;
+            m_Dirty.Anchor = false;
         }
 
         public void SyncSpikeScreenshotsFromHotkey(bool enabled)
         {
             if (m_Draft == null) return;
             m_Draft.SpikeScreenshots = enabled;
-            m_DirtySpikeScreenshots = false;
+            m_Dirty.SpikeScreenshots = false;
         }
 
         public void Toggle()
@@ -129,9 +116,9 @@ namespace VanillaProfiler.Overlay
         public void FlushPendingPosition()
         {
             if (!m_PosDirty) return;
-            SettingsStore.Current.SettingsX = m_WindowRect.x;
-            SettingsStore.Current.SettingsY = m_WindowRect.y;
-            SettingsStore.Save();
+            SettingsStore.Update(settings => settings.With(
+                settingsX: m_WindowRect.x,
+                settingsY: m_WindowRect.y));
             m_PosDirty = false;
         }
 
@@ -160,7 +147,7 @@ namespace VanillaProfiler.Overlay
         private void EnsureWindowRect(float scale)
         {
             if (m_HasWindowRect) return;
-            var s = SettingsStore.Current;
+            var s = SettingsStore.Snapshot.Settings;
             var (logicalW, logicalH) = PanelLayout.LogicalSize(scale);
             float h = MeasureHeight();
 
@@ -214,26 +201,26 @@ namespace VanillaProfiler.Overlay
         private float DrawTextSettings(OverlayTheme theme, float lx, float ly)
         {
             ly = SettingsWidgets.DrawTextField(theme, lx, ly, "Report interval (s)",
-                ref m_IntervalText, () => { m_DirtyReportInterval = true; m_ErrorText = null; }, "1-60");
+                ref m_IntervalText, () => { m_Dirty.ReportInterval = true; m_ErrorText = null; }, "1-60");
             return SettingsWidgets.DrawTextField(theme, lx, ly, "Sparkline width",
-                ref m_SparklineWidthText, () => { m_DirtySparklineWidth = true; m_ErrorText = null; }, "10-60");
+                ref m_SparklineWidthText, () => { m_Dirty.SparklineWidth = true; m_ErrorText = null; }, "10-60");
         }
 
         private float DrawSpikeThreshold(OverlayTheme theme, float lx, float ly)
         {
             return SettingsWidgets.DrawTextField(theme, lx, ly, "Spike threshold (ms)",
-                ref m_SpikeThresholdText, () => { m_DirtySpikeThreshold = true; m_ErrorText = null; }, "33-1000");
+                ref m_SpikeThresholdText, () => { m_Dirty.SpikeThreshold = true; m_ErrorText = null; }, "33-1000");
         }
 
         private float DrawToggleSettings(OverlayTheme theme, float lx, float ly, float fw)
         {
             ly = SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft!.SpikeScreenshots,
                 " Spike screenshots (also Ctrl+F7 toggle)",
-                v => { m_Draft.SpikeScreenshots = v; m_DirtySpikeScreenshots = true; });
+                v => { m_Draft.SpikeScreenshots = v; m_Dirty.SpikeScreenshots = true; });
 
             ly = SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft.ProfileVanillaSystems,
                 " Profile vanilla systems",
-                v => { m_Draft.ProfileVanillaSystems = v; m_DirtyProfileVanilla = true; },
+                v => { m_Draft.ProfileVanillaSystems = v; m_Dirty.ProfileVanilla = true; },
                 bottomGap: 2f);
 
             GUI.Label(new Rect(lx, ly, fw, OverlayPanel.LINE_H),
@@ -243,17 +230,17 @@ namespace VanillaProfiler.Overlay
 
             return SettingsWidgets.DrawToggleRow(theme, lx, ly, fw, m_Draft.HideHintBadge,
                 " Show hint pill in Hide mode",
-                v => { m_Draft.HideHintBadge = v; m_DirtyHideHintBadge = true; });
+                v => { m_Draft.HideHintBadge = v; m_Dirty.HideHintBadge = true; });
         }
 
         private float DrawModeSettings(OverlayTheme theme, float lx, float ly, float fw)
         {
             ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Default mode",
                 m_Draft!.DefaultMode, s_ModeLabels,
-                v => { m_Draft.DefaultMode = v; m_DirtyDefaultMode = true; });
+                v => { m_Draft.DefaultMode = v; m_Dirty.DefaultMode = true; });
             ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Position",
                 m_Draft.Anchor, s_AnchorLabels,
-                v => { m_Draft.Anchor = v; m_DirtyAnchor = true; });
+                v => { m_Draft.Anchor = v; m_Dirty.Anchor = true; });
             return DrawScaleRow(theme, lx, ly, fw);
         }
 
@@ -312,7 +299,7 @@ namespace VanillaProfiler.Overlay
             int current = ScaleIndex(m_Draft!.UiScale);
             ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "UI scale",
                 current, s_ScaleLabels,
-                v => { m_Draft.UiScale = s_ScaleValues[v]; m_DirtyUiScale = true; });
+                v => { m_Draft.UiScale = s_ScaleValues[v]; m_Dirty.UiScale = true; });
             if (current < 0)
             {
                 GUI.Label(new Rect(lx + 120f, rowY + OverlayPanel.LINE_H, fw - 120f, OverlayPanel.LINE_H),
@@ -324,7 +311,7 @@ namespace VanillaProfiler.Overlay
 
         private void OpenWithCurrent()
         {
-            m_Draft = SettingsDraft.Clone(SettingsStore.Current);
+            m_Draft = new SettingsDraft(SettingsStore.Snapshot.Settings);
             ClearDirty();
             m_ErrorText = null;
             SyncTextFieldsFromDraft();
@@ -332,7 +319,7 @@ namespace VanillaProfiler.Overlay
 
         private void ResetDraftToDefaults()
         {
-            m_Draft = new ProfilerSettings();
+            m_Draft = new SettingsDraft(new ProfilerSettings());
             MarkAllDirty();
             m_ErrorText = null;
             SyncTextFieldsFromDraft();
@@ -343,25 +330,15 @@ namespace VanillaProfiler.Overlay
             if (!ValidateDraftFromText())
                 return;
 
-            m_Draft!.Clamp();
-            var merged = SettingsDraft.Clone(SettingsStore.Current);
-            if (m_DirtyReportInterval) merged.ReportIntervalSec = m_Draft.ReportIntervalSec;
-            if (m_DirtyDefaultMode) merged.DefaultMode = m_Draft.DefaultMode;
-            if (m_DirtyAnchor) merged.Anchor = m_Draft.Anchor;
-            if (m_DirtySparklineWidth) merged.SparklineWidth = m_Draft.SparklineWidth;
-            if (m_DirtySpikeScreenshots) merged.SpikeScreenshots = m_Draft.SpikeScreenshots;
-            if (m_DirtySpikeThreshold) merged.SpikeThresholdMs = m_Draft.SpikeThresholdMs;
-            if (m_DirtyUiScale) merged.UiScale = m_Draft.UiScale;
-            if (m_DirtyProfileVanilla) merged.ProfileVanillaSystems = m_Draft.ProfileVanillaSystems;
-            if (m_DirtyHideHintBadge) merged.HideHintBadge = m_Draft.HideHintBadge;
+            var live = SettingsStore.Snapshot.Settings;
+            var merged = m_Dirty.Merge(live, m_Draft!);
             if (m_PosDirty)
             {
-                merged.SettingsX = m_WindowRect.x;
-                merged.SettingsY = m_WindowRect.y;
+                merged = merged.With(settingsX: m_WindowRect.x, settingsY: m_WindowRect.y);
                 m_PosDirty = false;
             }
 
-            SettingsStore.Replace(merged, save: true);
+            SettingsStore.Apply(merged);
             OnApplied?.Invoke(this, EventArgs.Empty);
             m_Draft = null;
             m_HasWindowRect = false;
@@ -375,19 +352,19 @@ namespace VanillaProfiler.Overlay
             var draft = m_Draft;
             if (draft == null) return false;
 
-            if (m_DirtyReportInterval)
+            if (m_Dirty.ReportInterval)
             {
                 if (!V.TryFloatInRange(m_IntervalText, 1f, 60f, "Report interval", out var v, out m_ErrorText))
                     return false;
                 draft.ReportIntervalSec = v;
             }
-            if (m_DirtySparklineWidth)
+            if (m_Dirty.SparklineWidth)
             {
                 if (!V.TryIntInRange(m_SparklineWidthText, 10, 60, "Sparkline width", out var v, out m_ErrorText))
                     return false;
                 draft.SparklineWidth = v;
             }
-            if (m_DirtySpikeThreshold)
+            if (m_Dirty.SpikeThreshold)
             {
                 if (!V.TryFloatInRange(m_SpikeThresholdText, 33f, 1000f, "Spike threshold", out var v, out m_ErrorText))
                     return false;
@@ -405,28 +382,12 @@ namespace VanillaProfiler.Overlay
 
         private void ClearDirty()
         {
-            m_DirtyReportInterval = false;
-            m_DirtyDefaultMode = false;
-            m_DirtyAnchor = false;
-            m_DirtySparklineWidth = false;
-            m_DirtySpikeScreenshots = false;
-            m_DirtySpikeThreshold = false;
-            m_DirtyUiScale = false;
-            m_DirtyProfileVanilla = false;
-            m_DirtyHideHintBadge = false;
+            m_Dirty.Clear();
         }
 
         private void MarkAllDirty()
         {
-            m_DirtyReportInterval = true;
-            m_DirtyDefaultMode = true;
-            m_DirtyAnchor = true;
-            m_DirtySparklineWidth = true;
-            m_DirtySpikeScreenshots = true;
-            m_DirtySpikeThreshold = true;
-            m_DirtyUiScale = true;
-            m_DirtyProfileVanilla = true;
-            m_DirtyHideHintBadge = true;
+            m_Dirty.MarkAll();
         }
     }
 }

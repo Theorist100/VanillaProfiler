@@ -61,7 +61,7 @@ namespace VanillaProfiler
             {
                 try
                 {
-                    var profiler = ProfilerHost.TryGetHotPath();
+                    var profiler = ProfilerHost.TryGetPatchSurface();
                     if (profiler == null) return;
                     profiler.RecordPhase(PhaseName(phase), Stopwatch.GetTimestamp() - __state);
 
@@ -98,7 +98,7 @@ namespace VanillaProfiler
             {
                 try
                 {
-                    ProfilerHost.TryGetHotPath()?.RecordPhase(PhaseName(phase), Stopwatch.GetTimestamp() - __state);
+                    ProfilerHost.TryGetPatchSurface()?.RecordPhase(PhaseName(phase), Stopwatch.GetTimestamp() - __state);
                 }
                 catch { /* profiler — never crash game */ }
             }

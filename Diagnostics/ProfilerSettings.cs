@@ -3,149 +3,175 @@ using System;
 namespace VanillaProfiler.Diagnostics
 {
     /// <summary>
-    /// Persisted user preferences for the overlay and profiler core.
-    /// JSON file lives at persistentDataPath/VanillaProfiler/settings.json.
-    /// Defaults match shipping behaviour, so a missing file is not an error.
-    ///
-    /// Threading: Current is read/written from the main thread only (Mod.OnLoad,
-    /// SettingsPanel.Apply, Ctrl+F12 hotkey, Ctrl+F7 SpikeScreenshot toggle — all main).
+    /// Immutable persisted user preferences for the overlay and profiler core.
+    /// Runtime code receives instances by value/reference and cannot mutate the
+    /// global settings object behind SettingsStore.
     /// </summary>
     [Serializable]
     public sealed class ProfilerSettings
     {
-        // Report cadence (seconds). Clamped on load to a sane range.
-        public float ReportIntervalSec = 5.0f;
-
-        // Default overlay mode at startup. 0=Status 1=Diagnosis 2=Recommendations 3=Details 4=Engine 5=Hidden
-        public int DefaultMode = 0;
-
-        // Default screen anchor. 0=TL 1=TR 2=BR 3=BL
-        public int Anchor = 0;
-
-        public int SparklineWidth = 60;
-
-        public bool SpikeScreenshots = true;
-        public float SpikeThresholdMs = 100.0f;
-
-        // Per-system Update() call duration (ms) above which the call is flagged as a
-        // suspected sync point. Default 0.5 ms is well above pure scheduling overhead
-        // (~0.01 ms) but below most real main-thread work. Tunable when investigating.
-        public float SyncPointThresholdMs = 0.5f;
-
-        public bool SettingsPanelHotkey = true;
-
-        // Profile every vanilla SystemBase.Update via Harmony patch. Off by default
-        // because patching ~300 vanilla systems adds measurable overhead; mod systems
-        // are always profiled. Toggle when you specifically need vanilla breakdown.
-        public bool ProfileVanillaSystems = false;
-
-        // Show the "[Ctrl+F9] Profiler" pill in the top-right when the overlay is
-        // hidden. ON by default so a player who toggles to Hide doesn't lose the
-        // hotkey. Players who already memorised the hotkey can disable it for a
-        // fully clean screen — the pill otherwise overlaps top-right HUD buttons.
-        public bool HideHintBadge = true;
-
-        // UI scaling. 0 = auto from screen height, otherwise explicit multiplier
-        // (typical values 1.0/1.5/2.0). Clamped to [0.75, 3.0] on load.
-        public float UiScale = 0f;
-
-        // Manual drag positions in scaled (logical) screen coordinates.
-        // -1 means "not set, fall back to Anchor preset". Updated when the user
-        // drags a panel by its title bar.
-        public float PanelX = -1f;
-        public float PanelY = -1f;
-        public float SettingsX = -1f;
-        public float SettingsY = -1f;
-
-        public bool Clamp()
+        public ProfilerSettings(
+            float reportIntervalSec = 5.0f,
+            int defaultMode = 0,
+            int anchor = 0,
+            int sparklineWidth = 60,
+            bool spikeScreenshots = true,
+            float spikeThresholdMs = 100.0f,
+            float syncPointThresholdMs = 0.5f,
+            bool settingsPanelHotkey = true,
+            bool profileVanillaSystems = false,
+            bool hideHintBadge = true,
+            float uiScale = 0f,
+            float panelX = -1f,
+            float panelY = -1f,
+            float settingsX = -1f,
+            float settingsY = -1f)
         {
-            bool changed = false;
-            changed |= ClampReportSettings();
-            changed |= ClampOverlaySettings();
-            changed |= ClampSpikeSettings();
-            changed |= ClampThresholdSettings();
-            changed |= ClampUiSettings();
-            return changed;
+            ReportIntervalSec = reportIntervalSec;
+            DefaultMode = defaultMode;
+            Anchor = anchor;
+            SparklineWidth = sparklineWidth;
+            SpikeScreenshots = spikeScreenshots;
+            SpikeThresholdMs = spikeThresholdMs;
+            SyncPointThresholdMs = syncPointThresholdMs;
+            SettingsPanelHotkey = settingsPanelHotkey;
+            ProfileVanillaSystems = profileVanillaSystems;
+            HideHintBadge = hideHintBadge;
+            UiScale = uiScale;
+            PanelX = panelX;
+            PanelY = panelY;
+            SettingsX = settingsX;
+            SettingsY = settingsY;
         }
 
-        public ProfilerSettings Clone()
-            => (ProfilerSettings)MemberwiseClone();
+        public float ReportIntervalSec { get; }
+        public int DefaultMode { get; }
+        public int Anchor { get; }
+        public int SparklineWidth { get; }
+        public bool SpikeScreenshots { get; }
+        public float SpikeThresholdMs { get; }
+        public float SyncPointThresholdMs { get; }
+        public bool SettingsPanelHotkey { get; }
+        public bool ProfileVanillaSystems { get; }
+        public bool HideHintBadge { get; }
+        public float UiScale { get; }
+        public float PanelX { get; }
+        public float PanelY { get; }
+        public float SettingsX { get; }
+        public float SettingsY { get; }
 
-        private bool ClampReportSettings()
+        public ProfilerSettings With(
+            float? reportIntervalSec = null,
+            int? defaultMode = null,
+            int? anchor = null,
+            int? sparklineWidth = null,
+            bool? spikeScreenshots = null,
+            float? spikeThresholdMs = null,
+            float? syncPointThresholdMs = null,
+            bool? settingsPanelHotkey = null,
+            bool? profileVanillaSystems = null,
+            bool? hideHintBadge = null,
+            float? uiScale = null,
+            float? panelX = null,
+            float? panelY = null,
+            float? settingsX = null,
+            float? settingsY = null)
+            => new ProfilerSettings(
+                reportIntervalSec ?? ReportIntervalSec,
+                defaultMode ?? DefaultMode,
+                anchor ?? Anchor,
+                sparklineWidth ?? SparklineWidth,
+                spikeScreenshots ?? SpikeScreenshots,
+                spikeThresholdMs ?? SpikeThresholdMs,
+                syncPointThresholdMs ?? SyncPointThresholdMs,
+                settingsPanelHotkey ?? SettingsPanelHotkey,
+                profileVanillaSystems ?? ProfileVanillaSystems,
+                hideHintBadge ?? HideHintBadge,
+                uiScale ?? UiScale,
+                panelX ?? PanelX,
+                panelY ?? PanelY,
+                settingsX ?? SettingsX,
+                settingsY ?? SettingsY).Normalize();
+
+        public ProfilerSettings Normalize() => Normalize(out _);
+
+        public ProfilerSettings Normalize(out bool changed)
         {
-            bool changed = false;
-            if (float.IsNaN(ReportIntervalSec) || float.IsInfinity(ReportIntervalSec))
-                changed |= Set(ref ReportIntervalSec, 5f);
-            if (ReportIntervalSec < 1f) changed |= Set(ref ReportIntervalSec, 1f);
-            if (ReportIntervalSec > 60f) changed |= Set(ref ReportIntervalSec, 60f);
-            return changed;
+            changed = false;
+            float reportIntervalSec = ClampFloat(ReportIntervalSec, 1f, 60f, 5f, ref changed);
+            int defaultMode = ClampInt(DefaultMode, 0, 5, 0, ref changed);
+            int anchor = ClampInt(Anchor, 0, 3, 0, ref changed);
+            int sparklineWidth = ClampInt(SparklineWidth, 10, 60, 60, ref changed);
+            float spikeThresholdMs = ClampFloat(SpikeThresholdMs, 33f, 1000f, 100f, ref changed);
+            float syncPointThresholdMs = ClampFloat(SyncPointThresholdMs, 0.05f, 10f, 0.5f, ref changed);
+            float uiScale = NormalizeUiScale(UiScale, ref changed);
+            float panelX = NormalizePosition(PanelX, ref changed);
+            float panelY = NormalizePosition(PanelY, ref changed);
+            float settingsX = NormalizePosition(SettingsX, ref changed);
+            float settingsY = NormalizePosition(SettingsY, ref changed);
+
+            if (!changed) return this;
+            return new ProfilerSettings(
+                reportIntervalSec,
+                defaultMode,
+                anchor,
+                sparklineWidth,
+                SpikeScreenshots,
+                spikeThresholdMs,
+                syncPointThresholdMs,
+                SettingsPanelHotkey,
+                ProfileVanillaSystems,
+                HideHintBadge,
+                uiScale,
+                panelX,
+                panelY,
+                settingsX,
+                settingsY);
         }
 
-        private bool ClampOverlaySettings()
+        private static float ClampFloat(float value, float min, float max, float fallback, ref bool changed)
         {
-            bool changed = false;
-            if (DefaultMode < 0 || DefaultMode > 5) changed |= Set(ref DefaultMode, 0);
-            if (Anchor < 0 || Anchor > 3) changed |= Set(ref Anchor, 0);
-            if (SparklineWidth < 10) changed |= Set(ref SparklineWidth, 10);
-            if (SparklineWidth > 60) changed |= Set(ref SparklineWidth, 60);
-            return changed;
+            float next = value;
+            if (float.IsNaN(next) || float.IsInfinity(next)) next = fallback;
+            if (next < min) next = min;
+            if (next > max) next = max;
+            if (next.Equals(value)) return next;
+            changed = true;
+            return next;
         }
 
-        private bool ClampSpikeSettings()
+        private static int ClampInt(int value, int min, int max, int fallback, ref bool changed)
         {
-            bool changed = false;
-            if (float.IsNaN(SpikeThresholdMs) || float.IsInfinity(SpikeThresholdMs))
-                changed |= Set(ref SpikeThresholdMs, 100f);
-            if (SpikeThresholdMs < 33f) changed |= Set(ref SpikeThresholdMs, 33f);
-            if (SpikeThresholdMs > 1000f) changed |= Set(ref SpikeThresholdMs, 1000f);
-            return changed;
+            int next = value;
+            if (next < min || next > max) next = fallback;
+            if (next == value) return next;
+            changed = true;
+            return next;
         }
 
-        private bool ClampThresholdSettings()
+        private static float NormalizeUiScale(float value, ref bool changed)
         {
-            bool changed = false;
-            if (float.IsNaN(SyncPointThresholdMs) || float.IsInfinity(SyncPointThresholdMs))
-                changed |= Set(ref SyncPointThresholdMs, 0.5f);
-            if (SyncPointThresholdMs < 0.05f) changed |= Set(ref SyncPointThresholdMs, 0.05f);
-            if (SyncPointThresholdMs > 10f) changed |= Set(ref SyncPointThresholdMs, 10f);
-            return changed;
-        }
-
-        private bool ClampUiSettings()
-        {
-            bool changed = false;
-            if (float.IsNaN(UiScale) || float.IsInfinity(UiScale))
-                changed |= Set(ref UiScale, 0f);
-            // 0 (auto) is the only "off" sentinel; any positive value is a manual scale
-            // and must be clamped into the supported range.
-            if (UiScale > 0f)
+            float next = value;
+            if (float.IsNaN(next) || float.IsInfinity(next)) next = 0f;
+            if (next > 0f)
             {
-                if (UiScale < 0.75f) changed |= Set(ref UiScale, 0.75f);
-                if (UiScale > 3f) changed |= Set(ref UiScale, 3f);
+                if (next < 0.75f) next = 0.75f;
+                if (next > 3f) next = 3f;
             }
-            else if (UiScale < 0f)
+            else if (next < 0f)
             {
-                changed |= Set(ref UiScale, 0f);
+                next = 0f;
             }
-            if (float.IsNaN(PanelX) || float.IsInfinity(PanelX)) changed |= Set(ref PanelX, -1f);
-            if (float.IsNaN(PanelY) || float.IsInfinity(PanelY)) changed |= Set(ref PanelY, -1f);
-            if (float.IsNaN(SettingsX) || float.IsInfinity(SettingsX)) changed |= Set(ref SettingsX, -1f);
-            if (float.IsNaN(SettingsY) || float.IsInfinity(SettingsY)) changed |= Set(ref SettingsY, -1f);
-            return changed;
+            if (next.Equals(value)) return next;
+            changed = true;
+            return next;
         }
 
-        private static bool Set(ref float field, float value)
+        private static float NormalizePosition(float value, ref bool changed)
         {
-            if (field.Equals(value)) return false;
-            field = value;
-            return true;
-        }
-
-        private static bool Set(ref int field, int value)
-        {
-            if (field == value) return false;
-            field = value;
-            return true;
+            if (!float.IsNaN(value) && !float.IsInfinity(value)) return value;
+            changed = true;
+            return -1f;
         }
     }
 }

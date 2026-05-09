@@ -105,7 +105,7 @@ namespace VanillaProfiler
                 // SystemInfo) because mod-options screens can flip Harmony
                 // patches at runtime; SystemReplacementDetector rebuilds the
                 // set once per report cycle.
-                var profiler = ProfilerHost.TryGetHotPath();
+                var profiler = ProfilerHost.TryGetPatchSurface();
                 if (profiler == null) return;
 
                 if (info.IsVanilla)

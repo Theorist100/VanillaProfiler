@@ -8,7 +8,7 @@ namespace VanillaProfiler
 {
     /// <summary>
     /// Profiler instance — coordinates aggregation, memory sampling, report building, and sinks.
-    /// Created and disposed by VanillaProfilerMod. Accessed from hot paths via ProfilerHost.TryGet.
+    /// Created and disposed by VanillaProfilerMod. Accessed from hot paths via ProfilerHost.TryGetPatchSurface.
     /// </summary>
     /// <remarks>
     /// THREADING CONTRACT
@@ -23,7 +23,7 @@ namespace VanillaProfiler
     /// <c>m_Disposed</c> rejects stale calls after the mod has been disposed. ProfilerHost still uses
     /// Volatile.Read/Write for explicit static publication across Harmony entry points.
     /// </remarks>
-    public sealed class Profiler : IProfilerHotPath, IDisposable
+    public sealed class Profiler : IProfilerPatchSurface, IProfilerReadSurface, IDisposable
     {
         private const double SPIKE_30FPS_MS = 1000.0 / 30.0;
         private const double SPIKE_20FPS_MS = 1000.0 / 20.0;
@@ -34,6 +34,8 @@ namespace VanillaProfiler
         private readonly ReportBuilder m_Builder = new();
         private readonly ReportDispatcher m_Dispatcher;
         private readonly ReportScheduler m_Scheduler = new();
+        private readonly SpikeScreenshot m_SpikeScreenshots = new();
+        private readonly GraphicsSettingsProbe m_GraphicsSettings = new();
 
         // Frame timing — main thread only
         private int m_ReportCount;
@@ -48,6 +50,9 @@ namespace VanillaProfiler
         public HealthReport? LastHealth { get; private set; }
         public MemoryHistory MemoryHistory { get; }
         public FpsSparkline FpsSparkline { get; } = new();
+        public SpikeScreenshot SpikeScreenshots => m_SpikeScreenshots;
+        public GraphicsSettingsProbe GraphicsSettings => m_GraphicsSettings;
+        public RecommendationEngine Recommendations { get; }
 
         public ProfilerLifecycleState LifecycleState => m_LifecycleState;
         public bool IsGameLoaded => m_LifecycleState == ProfilerLifecycleState.Settling
@@ -62,6 +67,7 @@ namespace VanillaProfiler
         {
             m_Metrics = new MetricsAggregator(m_Settings);
             MemoryHistory = new MemoryHistory(m_Settings);
+            Recommendations = new RecommendationEngine(m_GraphicsSettings);
             m_Dispatcher = new ReportDispatcher(sinks);
             m_Scheduler.Reset();
             m_Dispatcher.Initialize();
@@ -163,7 +169,7 @@ namespace VanillaProfiler
             m_Metrics.RecordFrame(timing.DeltaTicks, timing.FrameMs, SPIKE_30FPS_MS, SPIKE_20FPS_MS);
             FpsSparkline.OnFrame(timing.FrameMs, timing.FrameSec);
             if (IsGameLoaded)
-                SpikeScreenshot.OnFrame(timing.FrameMs, m_Settings());
+                m_SpikeScreenshots.OnFrame(timing.FrameMs, m_Settings());
 
             if (reportDue)
                 Report(now);
@@ -282,7 +288,7 @@ namespace VanillaProfiler
             m_Memory.ResetBaseline();
             MemoryHistory.Reset();
             FpsSparkline.Reset();
-            SpikeScreenshot.Reset();
+            m_SpikeScreenshots.Reset();
             m_HarmonyScanned = false;
             m_ReplacementsLogged = false;
             m_Scheduler.Reset();

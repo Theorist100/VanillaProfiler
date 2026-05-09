@@ -136,7 +136,7 @@ namespace VanillaProfiler.Diagnostics
         /// snapshot, since this method runs once before any window has
         /// accumulated timing data.
         /// </summary>
-        public static void LogTo(Profiler profiler, IReadOnlyList<Replacement> replacements)
+        public static void LogTo(IProfilerReadSurface profiler, IReadOnlyList<Replacement> replacements)
         {
             if (profiler == null || replacements == null) return;
             try

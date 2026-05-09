@@ -13,19 +13,21 @@ namespace VanillaProfiler
         private static Profiler? s_Current;
 
         /// <summary>
-        /// Atomic read of the current Profiler instance. Returns null if not registered or
+        /// Atomic read of the read/control surface. Returns null if not registered or
         /// already unregistered. Callers MUST capture the result into a local before use,
         /// otherwise the Unregister-then-call race re-emerges.
         /// </summary>
-        public static Profiler? TryGet() => Volatile.Read(ref s_Current);
+        public static IProfilerReadSurface? TryGetReadSurface() => Volatile.Read(ref s_Current);
 
-        public static IProfilerHotPath? TryGetHotPath() => Volatile.Read(ref s_Current);
+        /// <summary>Atomic read of the patch-only surface used by Harmony/ECS hot paths.</summary>
+        public static IProfilerPatchSurface? TryGetPatchSurface() => Volatile.Read(ref s_Current);
 
-        /// <summary>Throws if accessed outside Register..Unregister window. Prefer TryGet().</summary>
-        public static Profiler Current
-            => TryGet() ?? throw new InvalidOperationException(
-                "ProfilerHost.Current accessed before Register or after Unregister");
-
+        /// <summary>
+        /// Single-shot existence check. Safe to combine with a subsequent read because
+        /// no caller currently does both — readers either skip work entirely (this gate)
+        /// or capture a surface via TryGet*Surface(). Do not pair this with TryGet*Surface()
+        /// in the same control flow; that re-introduces the Unregister race.
+        /// </summary>
         public static bool IsAvailable => Volatile.Read(ref s_Current) != null;
 
         public static void Register(Profiler profiler)

@@ -3,36 +3,63 @@ using VanillaProfiler.Diagnostics;
 namespace VanillaProfiler.Overlay
 {
     /// <summary>
-    /// Pure helpers for working with a <see cref="ProfilerSettings"/> draft —
-    /// the Clone-Apply pattern used by SettingsPanel. Kept as static utilities so
-    /// the panel itself doesn't have to host trivial copy logic.
+    /// Mutable form state for SettingsPanel. The persisted ProfilerSettings object
+    /// stays immutable; this draft absorbs IMGUI edits until Apply builds a new
+    /// ProfilerSettings instance.
     /// </summary>
-    public static class SettingsDraft
+    public sealed class SettingsDraft
     {
-        /// <summary>Deep-copy a settings instance so edits don't mutate the live one.</summary>
-        /// <remarks>
-        /// Every public field on ProfilerSettings must be listed here. Missing a field means
-        /// SettingsPanel.Apply (which builds <c>merged = Clone(SettingsStore.Current)</c>
-        /// and only re-applies dirty fields) will silently revert that field to its
-        /// compile-time default on every Apply. SyncPointThresholdMs and ProfileVanillaSystems
-        /// were the original casualties — kept the list exhaustive after that bug.
-        /// </remarks>
-        public static ProfilerSettings Clone(ProfilerSettings src) => new()
+        public float ReportIntervalSec;
+        public int DefaultMode;
+        public int Anchor;
+        public int SparklineWidth;
+        public bool SpikeScreenshots;
+        public float SpikeThresholdMs;
+        public float SyncPointThresholdMs;
+        public bool SettingsPanelHotkey;
+        public bool ProfileVanillaSystems;
+        public bool HideHintBadge;
+        public float UiScale;
+        public float PanelX;
+        public float PanelY;
+        public float SettingsX;
+        public float SettingsY;
+
+        public SettingsDraft(ProfilerSettings settings)
         {
-            ReportIntervalSec = src.ReportIntervalSec,
-            DefaultMode = src.DefaultMode,
-            Anchor = src.Anchor,
-            SparklineWidth = src.SparklineWidth,
-            SpikeScreenshots = src.SpikeScreenshots,
-            SpikeThresholdMs = src.SpikeThresholdMs,
-            SyncPointThresholdMs = src.SyncPointThresholdMs,
-            SettingsPanelHotkey = src.SettingsPanelHotkey,
-            ProfileVanillaSystems = src.ProfileVanillaSystems,
-            UiScale = src.UiScale,
-            PanelX = src.PanelX,
-            PanelY = src.PanelY,
-            SettingsX = src.SettingsX,
-            SettingsY = src.SettingsY,
-        };
+            ReportIntervalSec = settings.ReportIntervalSec;
+            DefaultMode = settings.DefaultMode;
+            Anchor = settings.Anchor;
+            SparklineWidth = settings.SparklineWidth;
+            SpikeScreenshots = settings.SpikeScreenshots;
+            SpikeThresholdMs = settings.SpikeThresholdMs;
+            SyncPointThresholdMs = settings.SyncPointThresholdMs;
+            SettingsPanelHotkey = settings.SettingsPanelHotkey;
+            ProfileVanillaSystems = settings.ProfileVanillaSystems;
+            HideHintBadge = settings.HideHintBadge;
+            UiScale = settings.UiScale;
+            PanelX = settings.PanelX;
+            PanelY = settings.PanelY;
+            SettingsX = settings.SettingsX;
+            SettingsY = settings.SettingsY;
+        }
+
+        public ProfilerSettings ToSettings()
+            => new(
+                ReportIntervalSec,
+                DefaultMode,
+                Anchor,
+                SparklineWidth,
+                SpikeScreenshots,
+                SpikeThresholdMs,
+                SyncPointThresholdMs,
+                SettingsPanelHotkey,
+                ProfileVanillaSystems,
+                HideHintBadge,
+                UiScale,
+                PanelX,
+                PanelY,
+                SettingsX,
+                SettingsY);
     }
 }

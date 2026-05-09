@@ -77,7 +77,7 @@ namespace VanillaProfiler
         {
             try
             {
-                ProfilerHost.TryGetHotPath()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - startTicks);
+                ProfilerHost.TryGetPatchSurface()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - startTicks);
             }
             catch { /* profiler — never crash game */ }
         }

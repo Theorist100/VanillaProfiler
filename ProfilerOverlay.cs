@@ -56,11 +56,10 @@ namespace VanillaProfiler
             m_PanelPosition = new PanelPositionController(
                 new Rect(OverlayPanel.MARGIN, OverlayPanel.MARGIN, WIDTH, 100f),
                 MIN_VISIBLE_PX,
-                () => (SettingsStore.Current.PanelX, SettingsStore.Current.PanelY),
+                () => (SettingsStore.Snapshot.Settings.PanelX, SettingsStore.Snapshot.Settings.PanelY),
                 (x, y) =>
                 {
-                    SettingsStore.Current.PanelX = x;
-                    SettingsStore.Current.PanelY = y;
+                    SettingsStore.Update(settings => settings.With(panelX: x, panelY: y), save: false);
                 },
                 ScheduleSettingsSave);
 
@@ -75,7 +74,7 @@ namespace VanillaProfiler
             m_Input.OnToggleScreenshots += (s, e) => DoToggleScreenshots();
             m_Input.OnToggleSettings += (s, e) => DoOpenSettings();
 
-            // Apply has already committed the new settings to Current. DefaultMode is a
+            // Apply has already committed the new settings to SettingsStore. DefaultMode is a
             // startup preference, so applying unrelated settings must not jump screens.
             m_Settings.OnApplied += (s, e) =>
             {
@@ -86,14 +85,14 @@ namespace VanillaProfiler
 
         private void ApplyStartupSettings()
         {
-            var s = SettingsStore.Current;
+            var s = SettingsStore.Snapshot.Settings;
             m_State.ApplyStartup(s.DefaultMode, s.Anchor, m_Modes.Length);
             m_PanelPosition.Load();
         }
 
         private void ApplyLiveSettings()
         {
-            var s = SettingsStore.Current;
+            var s = SettingsStore.Snapshot.Settings;
             var nextAnchor = (Anchor)Mathf.Clamp(s.Anchor, 0, 3);
             if (nextAnchor != m_State.Anchor)
             {
@@ -109,7 +108,7 @@ namespace VanillaProfiler
             m_Input.Poll(m_Settings.IsOpen);
             m_Settings.SyncLiveSettings();
 
-            // Debounced save: panel drags and corner snaps update Current
+            // Debounced save: panel drags and corner snaps update SettingsStore
             // immediately, then persist the final state once after input settles.
             if (m_SettingsSaveDirty && Time.realtimeSinceStartup - m_SettingsSaveDirtyAt >= SAVE_DEBOUNCE_S)
                 FlushPendingSettingsSave();
@@ -142,7 +141,7 @@ namespace VanillaProfiler
 
         private void DrawScaled(float scale, ProfilerSettingsSnapshot settings)
         {
-            var profiler = ProfilerHost.TryGet();
+            var profiler = ProfilerHost.TryGetReadSurface();
             var snapshot = profiler?.LastSnapshot;
             var health = profiler?.LastHealth;
             var mode = m_Modes[m_State.ModeIndex];
@@ -183,7 +182,7 @@ namespace VanillaProfiler
             m_Toast.Draw(m_Theme, scale);
         }
 
-        private void DrawMainPanel(Profiler profiler, IOverlayMode mode, OverlaySnapshot snapshot,
+        private void DrawMainPanel(IProfilerReadSurface profiler, IOverlayMode mode, OverlaySnapshot snapshot,
             HealthReport health, float scale, ProfilerSettingsSnapshot settings)
         {
             float contentHeight = mode.MeasureHeight(snapshot);
@@ -203,7 +202,7 @@ namespace VanillaProfiler
             m_PanelPosition.CompleteWindow(rect, before, scale);
         }
 
-        private void DrawMainWindowContents(Profiler profiler, OverlaySnapshot snapshot, HealthReport health,
+        private void DrawMainWindowContents(IProfilerReadSurface profiler, OverlaySnapshot snapshot, HealthReport health,
             IOverlayMode mode, ProfilerSettingsSnapshot settings)
         {
             var panelRect = m_PanelPosition.Rect;
@@ -247,24 +246,27 @@ namespace VanillaProfiler
             int previousMode = m_State.ModeIndex;
             m_State.SetMode(index, m_Modes.Length);
             if (m_State.ModeIndex == previousMode) return;
-            if (m_Modes[m_State.ModeIndex] is RecommendationsMode)
-                GraphicsSettingsProbe.Invalidate();
+            if (m_Modes[m_State.ModeIndex] is RecommendationsMode recommendationsMode)
+            {
+                ProfilerHost.TryGetReadSurface()?.GraphicsSettings.Invalidate();
+                recommendationsMode.InvalidateCache();
+            }
             // Hide-mode safety net: when the hint pill is disabled the screen
             // goes fully blank, leaving no visible cue how to come back. The
             // toast lasts ~3s, then the screen is truly clean as Emilithe asked.
             // We skip it when the pill is on — the pill already advertises the
             // hotkey, and a flashing toast on top of it is just noise.
-            if (m_Modes[m_State.ModeIndex] is HiddenMode && !SettingsStore.Current.HideHintBadge)
+            if (m_Modes[m_State.ModeIndex] is HiddenMode && !SettingsStore.Snapshot.Settings.HideHintBadge)
                 m_Toast.Show("Profiler hidden — Ctrl+F9 to cycle, Ctrl+F8 settings");
         }
 
         private void DoOpenSettings() => m_Settings.Toggle();
 
-        private void DoForceDump() => ProfilerHost.TryGet()?.ForceReport();
+        private void DoForceDump() => ProfilerHost.TryGetReadSurface()?.ForceReport();
 
         private void DoExportReport()
         {
-            ProfilerHost.TryGet()?.ForceReport();
+            ProfilerHost.TryGetReadSurface()?.ForceReport();
             string? saved = ReportExporter.Export();
             m_Toast.Show(saved != null
                 ? $"Support file created: {Path.GetFileName(saved)}"
@@ -274,7 +276,7 @@ namespace VanillaProfiler
         private void DoCycleAnchor()
         {
             m_State.SetAnchor(m_State.Anchor.Cycle());
-            SettingsStore.Current.Anchor = (int)m_State.Anchor;
+            SettingsStore.Update(settings => settings.With(anchor: (int)m_State.Anchor), save: false);
             m_Settings.SyncAnchorFromHotkey((int)m_State.Anchor);
             // Cycling anchor explicitly snaps the panel to a corner — discard
             // any prior manual drag so the next layout uses the preset.
@@ -283,8 +285,12 @@ namespace VanillaProfiler
 
         private void DoToggleScreenshots()
         {
-            bool next = !SpikeScreenshot.Enabled;
-            SpikeScreenshot.Enabled = next;
+            var spikeScreenshots = ProfilerHost.TryGetReadSurface()?.SpikeScreenshots;
+            bool next = !(spikeScreenshots?.Enabled ?? SettingsStore.Snapshot.Settings.SpikeScreenshots);
+            if (spikeScreenshots != null)
+                spikeScreenshots.Enabled = next;
+            else
+                SettingsStore.Update(settings => settings.With(spikeScreenshots: next));
             m_Settings.SyncSpikeScreenshotsFromHotkey(next);
             m_Toast.Show(next ? "Spike screenshots: ON" : "Spike screenshots: OFF");
         }

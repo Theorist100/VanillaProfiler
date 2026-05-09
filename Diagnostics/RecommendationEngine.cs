@@ -12,19 +12,25 @@ namespace VanillaProfiler.Diagnostics
     /// guide and from CS2 community testing (PC Gamer / cs2performance.com /
     /// switchbladegaming.com). Order: Critical first, then Suggested, then Info.
     /// </summary>
-    public static class RecommendationEngine
+    public sealed class RecommendationEngine
     {
         private const int MAX_RECOMMENDATIONS = 6;
+        private readonly GraphicsSettingsProbe m_GraphicsSettings;
 
-        public static IReadOnlyList<Recommendation> Build(HealthReport health, OverlaySnapshot snap)
+        public RecommendationEngine(GraphicsSettingsProbe graphicsSettings)
+        {
+            m_GraphicsSettings = graphicsSettings ?? throw new ArgumentNullException(nameof(graphicsSettings));
+        }
+
+        public IReadOnlyList<Recommendation> Build(HealthReport health, OverlaySnapshot snap)
         {
             var list = new List<Recommendation>(MAX_RECOMMENDATIONS);
             if (health == null || snap == null) return list;
 
             // Lazy probe — first time the player opens the Tips screen, read what's
             // currently set so we don't suggest fixes the player has already applied.
-            GraphicsSettingsProbe.EnsureProbed();
-            var probed = GraphicsSettingsProbe.State;
+            m_GraphicsSettings.EnsureProbed();
+            var probed = m_GraphicsSettings.State;
 
             AddCriticalRecommendations(list, health, probed);
 

@@ -1,9 +1,8 @@
 namespace VanillaProfiler.Diagnostics
 {
     /// <summary>
-    /// Point-in-time settings view for runtime services. The snapshot owns a clone
-    /// of ProfilerSettings, so adding a persisted setting does not require adding
-    /// another field here.
+    /// Point-in-time settings view for runtime services. ProfilerSettings is
+    /// immutable, so the snapshot can hold the settings reference directly.
     /// </summary>
     public sealed class ProfilerSettingsSnapshot
     {
@@ -13,7 +12,7 @@ namespace VanillaProfiler.Diagnostics
 
         private ProfilerSettingsSnapshot(ProfilerSettings settings)
         {
-            m_Settings = (settings ?? new ProfilerSettings()).Clone();
+            m_Settings = settings ?? new ProfilerSettings();
         }
 
         public static ProfilerSettingsSnapshot From(ProfilerSettings settings)

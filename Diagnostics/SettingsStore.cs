@@ -6,8 +6,9 @@ using VanillaProfiler.Output;
 namespace VanillaProfiler.Diagnostics
 {
     /// <summary>
-    /// Owns persisted settings state. ProfilerSettings is only the serialized DTO;
-    /// this store is the single place that loads, replaces and writes it.
+    /// Owns persisted settings state. Runtime code can read Snapshot and can only
+    /// replace settings atomically through Apply/Update; there is no mutable global
+    /// ProfilerSettings instance exposed to draw paths or Harmony patches.
     /// </summary>
     public static class SettingsStore
     {
@@ -18,8 +19,8 @@ namespace VanillaProfiler.Diagnostics
         // close to this means the file was corrupted or replaced by a malicious payload.
         private const long MAX_SETTINGS_BYTES = 256 * 1024;
 
-        public static ProfilerSettings Current { get; private set; } = new();
-        private static ProfilerSettingsSnapshot s_Snapshot = ProfilerSettingsSnapshot.From(Current);
+        private static ProfilerSettings s_Current = new();
+        private static ProfilerSettingsSnapshot s_Snapshot = ProfilerSettingsSnapshot.From(s_Current);
 
         public static ProfilerSettingsSnapshot Snapshot => s_Snapshot;
 
@@ -35,15 +36,10 @@ namespace VanillaProfiler.Diagnostics
             {
                 if (File.Exists(backup) && TryLoadFrom(backup, "backup"))
                 {
-                    // Preserve backup: SaveCore's atomic File.Replace would otherwise
-                    // move the (currently missing) primary OVER the just-recovered
-                    // backup, destroying our only good copy.
                     SaveCore(preserveBackup: true);
                     return;
                 }
-                Current = new ProfilerSettings();
-                RefreshSnapshot();
-                SaveCore();
+                ApplyCore(new ProfilerSettings(), save: true, preserveBackup: false);
                 return;
             }
 
@@ -52,33 +48,23 @@ namespace VanillaProfiler.Diagnostics
             if (File.Exists(backup) && TryLoadFrom(backup, "backup"))
             {
                 ModLog.Warn("Recovered settings from backup after primary file was corrupted");
-                // Same reason as above — without preserveBackup, File.Replace would
-                // move the corrupt primary into backup and we'd lose the only good copy.
                 SaveCore(preserveBackup: true);
                 return;
             }
 
             ModLog.Warn("Settings load failed and no usable backup found — resetting to defaults");
-            Current = new ProfilerSettings();
-            RefreshSnapshot();
-            SaveCore();
+            ApplyCore(new ProfilerSettings(), save: true, preserveBackup: false);
         }
 
-        public static void Replace(ProfilerSettings settings, bool save)
+        public static void Apply(ProfilerSettings settings, bool save = true)
         {
-            Current = settings ?? new ProfilerSettings();
-            Current.Clamp();
-            RefreshSnapshot();
-            if (save) SaveCore();
+            ApplyCore(settings, save, preserveBackup: false);
         }
 
-        public static void Mutate(Action<ProfilerSettings>? mutate, bool save)
+        public static void Update(Func<ProfilerSettings, ProfilerSettings>? update, bool save = true)
         {
-            if (mutate == null) return;
-            mutate(Current);
-            Current.Clamp();
-            RefreshSnapshot();
-            if (save) SaveCore();
+            if (update == null) return;
+            ApplyCore(update(s_Current), save, preserveBackup: false);
         }
 
         public static void Save()
@@ -103,11 +89,10 @@ namespace VanillaProfiler.Diagnostics
                 if (string.IsNullOrWhiteSpace(json))
                     throw new InvalidDataException("Empty settings JSON");
 
-                var loaded = new ProfilerSettings();
+                var loaded = new SerializedSettings();
                 JsonUtility.FromJsonOverwrite(json, loaded);
-                bool migrated = loaded.Clamp();
-                Current = loaded;
-                RefreshSnapshot();
+                var settings = loaded.ToSettings().Normalize(out bool migrated);
+                ApplyCore(settings, save: false, preserveBackup: false);
                 ModLog.Info($"Settings loaded from {label}: {path}");
                 if (migrated && string.Equals(label, "primary", StringComparison.Ordinal))
                     Save();
@@ -120,24 +105,28 @@ namespace VanillaProfiler.Diagnostics
             }
         }
 
+        private static void ApplyCore(ProfilerSettings settings, bool save, bool preserveBackup)
+        {
+            s_Current = (settings ?? new ProfilerSettings()).Normalize();
+            RefreshSnapshot();
+            if (save) SaveCore(preserveBackup);
+        }
+
         private static void SaveCore(bool preserveBackup = false)
         {
             string path = FilePath;
             string backup = path + ".bak";
             try
             {
-                Current.Clamp();
+                s_Current = s_Current.Normalize();
                 RefreshSnapshot();
                 string? dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                // preserveBackup=true skips the rotate-into-backup step. Recovery flows
-                // (primary missing or corrupt) need this — otherwise File.Replace would
-                // move the bad primary onto the just-recovered backup and trash it.
                 AtomicFileWriter.WriteAllText(
                     path,
-                    JsonUtility.ToJson(Current, prettyPrint: true),
+                    JsonUtility.ToJson(SerializedSettings.From(s_Current), prettyPrint: true),
                     encoding: null,
                     backupPath: preserveBackup ? null : backup);
             }
@@ -149,8 +138,65 @@ namespace VanillaProfiler.Diagnostics
 
         private static void RefreshSnapshot()
         {
-            s_Snapshot = ProfilerSettingsSnapshot.From(Current);
+            s_Snapshot = ProfilerSettingsSnapshot.From(s_Current);
         }
 
+        [Serializable]
+        private sealed class SerializedSettings
+        {
+            public float ReportIntervalSec = 5.0f;
+            public int DefaultMode = 0;
+            public int Anchor = 0;
+            public int SparklineWidth = 60;
+            public bool SpikeScreenshots = true;
+            public float SpikeThresholdMs = 100.0f;
+            public float SyncPointThresholdMs = 0.5f;
+            public bool SettingsPanelHotkey = true;
+            public bool ProfileVanillaSystems;
+            public bool HideHintBadge = true;
+            public float UiScale;
+            public float PanelX = -1f;
+            public float PanelY = -1f;
+            public float SettingsX = -1f;
+            public float SettingsY = -1f;
+
+            public static SerializedSettings From(ProfilerSettings settings)
+                => new()
+                {
+                    ReportIntervalSec = settings.ReportIntervalSec,
+                    DefaultMode = settings.DefaultMode,
+                    Anchor = settings.Anchor,
+                    SparklineWidth = settings.SparklineWidth,
+                    SpikeScreenshots = settings.SpikeScreenshots,
+                    SpikeThresholdMs = settings.SpikeThresholdMs,
+                    SyncPointThresholdMs = settings.SyncPointThresholdMs,
+                    SettingsPanelHotkey = settings.SettingsPanelHotkey,
+                    ProfileVanillaSystems = settings.ProfileVanillaSystems,
+                    HideHintBadge = settings.HideHintBadge,
+                    UiScale = settings.UiScale,
+                    PanelX = settings.PanelX,
+                    PanelY = settings.PanelY,
+                    SettingsX = settings.SettingsX,
+                    SettingsY = settings.SettingsY,
+                };
+
+            public ProfilerSettings ToSettings()
+                => new(
+                    ReportIntervalSec,
+                    DefaultMode,
+                    Anchor,
+                    SparklineWidth,
+                    SpikeScreenshots,
+                    SpikeThresholdMs,
+                    SyncPointThresholdMs,
+                    SettingsPanelHotkey,
+                    ProfileVanillaSystems,
+                    HideHintBadge,
+                    UiScale,
+                    PanelX,
+                    PanelY,
+                    SettingsX,
+                    SettingsY);
+        }
     }
 }

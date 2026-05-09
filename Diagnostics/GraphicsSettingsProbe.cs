@@ -27,25 +27,25 @@ namespace VanillaProfiler.Diagnostics
     /// All access wrapped in try/catch — failures leave fields null, which the
     /// recommendation engine treats as "show advice, we don't know the state".
     /// </summary>
-    public static class GraphicsSettingsProbe
+    public sealed class GraphicsSettingsProbe
     {
-        private static GraphicsSettingsState? s_State;
+        private GraphicsSettingsState? m_State;
 
-        public static GraphicsSettingsState State
+        public GraphicsSettingsState State
         {
             get
             {
                 EnsureProbed();
-                return s_State!;
+                return m_State!;
             }
         }
 
-        public static void EnsureProbed()
+        public void EnsureProbed()
         {
-            if (s_State != null) return;
+            if (m_State != null) return;
             var state = new GraphicsSettingsState { ProbeAttempted = true };
             ProbeAll(state);
-            s_State = state;
+            m_State = state;
             ModLog.Info(
                 "Graphics probe: " +
                 $"FullscreenWindowed={Fmt(state.IsFullscreenWindowed)} " +
@@ -57,9 +57,9 @@ namespace VanillaProfiler.Diagnostics
         }
 
         /// <summary>Force a re-read on next access. Call after the player likely changed settings.</summary>
-        public static void Invalidate()
+        public void Invalidate()
         {
-            s_State = null;
+            m_State = null;
         }
 
         private static void ProbeAll(GraphicsSettingsState state)

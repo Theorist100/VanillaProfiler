@@ -9,85 +9,85 @@ namespace VanillaProfiler.Diagnostics
     /// Throttled so a long stutter sequence does not flood the disk.
     /// Output: persistentDataPath/Logs/spikes/spike_yyyyMMdd_HHmmss.png
     /// </summary>
-    public static class SpikeScreenshot
+    public sealed class SpikeScreenshot
     {
         private const float COOLDOWN_S = 30.0f;       // at most one capture per 30 seconds
 
-        public static bool Enabled
+        public bool Enabled
         {
-            get => SettingsStore.Current.SpikeScreenshots;
-            set { SettingsStore.Current.SpikeScreenshots = value; SettingsStore.Save(); }
+            get => SettingsStore.Snapshot.Settings.SpikeScreenshots;
+            set => SettingsStore.Update(settings => settings.With(spikeScreenshots: value));
         }
 
-        private static float s_LastCaptureRealtime = float.NegativeInfinity;
-        private static int s_TotalCaptured;
-        private static int s_SessionSerial;
-        private static string? s_OutputDir;
-        private static bool s_DirChecked;
+        private float m_LastCaptureRealtime = float.NegativeInfinity;
+        private int m_TotalCaptured;
+        private int m_SessionSerial;
+        private string? m_OutputDir;
+        private bool m_DirChecked;
 
-        public static int TotalCaptured => s_TotalCaptured;
+        public int TotalCaptured => m_TotalCaptured;
 
-        public static void OnFrame(double frameMs)
+        public void OnFrame(double frameMs)
         {
             OnFrame(frameMs, SettingsStore.Snapshot);
         }
 
-        public static void OnFrame(double frameMs, ProfilerSettingsSnapshot settings)
+        public void OnFrame(double frameMs, ProfilerSettingsSnapshot settings)
         {
             if (!settings.Settings.SpikeScreenshots || frameMs < settings.Settings.SpikeThresholdMs) return;
 
             float now = Time.realtimeSinceStartup;
-            if (now - s_LastCaptureRealtime < COOLDOWN_S) return;
+            if (now - m_LastCaptureRealtime < COOLDOWN_S) return;
 
             try
             {
                 EnsureDir();
-                if (s_OutputDir == null)
+                if (m_OutputDir == null)
                 {
-                    s_LastCaptureRealtime = now;
+                    m_LastCaptureRealtime = now;
                     return;
                 }
 
-                int captureNumber = s_TotalCaptured + 1;
-                string fileName = $"spike_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{s_SessionSerial:00}_{captureNumber:000}_{frameMs:F0}ms.png";
-                string fullPath = Path.Combine(s_OutputDir, fileName);
+                int captureNumber = m_TotalCaptured + 1;
+                string fileName = $"spike_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{m_SessionSerial:00}_{captureNumber:000}_{frameMs:F0}ms.png";
+                string fullPath = Path.Combine(m_OutputDir, fileName);
                 ScreenCapture.CaptureScreenshot(fullPath);
-                s_LastCaptureRealtime = now;
-                s_TotalCaptured = captureNumber;
+                m_LastCaptureRealtime = now;
+                m_TotalCaptured = captureNumber;
                 ModLog.Info($"Spike screenshot: {fileName} (frame {frameMs:F0}ms)");
             }
             catch (Exception ex)
             {
-                s_DirChecked = false;
-                s_OutputDir = null;
+                m_DirChecked = false;
+                m_OutputDir = null;
                 ModLog.Warn($"Spike screenshot failed: {ex}");
             }
         }
 
-        public static void Reset()
+        public void Reset()
         {
-            s_LastCaptureRealtime = float.NegativeInfinity;
-            s_TotalCaptured = 0;
-            s_SessionSerial = (s_SessionSerial + 1) % 100;
-            s_OutputDir = null;
-            s_DirChecked = false;
+            m_LastCaptureRealtime = float.NegativeInfinity;
+            m_TotalCaptured = 0;
+            m_SessionSerial = (m_SessionSerial + 1) % 100;
+            m_OutputDir = null;
+            m_DirChecked = false;
         }
 
-        private static void EnsureDir()
+        private void EnsureDir()
         {
-            if (s_DirChecked && !string.IsNullOrEmpty(s_OutputDir) && Directory.Exists(s_OutputDir))
+            if (m_DirChecked && !string.IsNullOrEmpty(m_OutputDir) && Directory.Exists(m_OutputDir))
                 return;
 
             try
             {
-                s_OutputDir = Path.Combine(Application.persistentDataPath, "Logs", "spikes");
-                Directory.CreateDirectory(s_OutputDir);
-                s_DirChecked = true;
+                m_OutputDir = Path.Combine(Application.persistentDataPath, "Logs", "spikes");
+                Directory.CreateDirectory(m_OutputDir);
+                m_DirChecked = true;
             }
             catch
             {
-                s_OutputDir = null;
-                s_DirChecked = false;
+                m_OutputDir = null;
+                m_DirChecked = false;
             }
         }
     }
