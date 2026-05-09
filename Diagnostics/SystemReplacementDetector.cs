@@ -31,42 +31,54 @@ namespace VanillaProfiler.Diagnostics
     {
         public sealed class Replacement
         {
-            public string VanillaSystem = string.Empty;
-            public string OwnerMod = string.Empty;
+            public Replacement(Type systemType, string vanillaSystem, string ownerMod)
+            {
+                SystemType = systemType;
+                VanillaSystem = vanillaSystem;
+                OwnerMod = ownerMod;
+            }
+
+            public Type SystemType { get; }
+            public string VanillaSystem { get; }
+            public string OwnerMod { get; }
         }
 
-        // Hot-path snapshot of currently-patched vanilla System types. Read by
-        // SystemAutoProfiler.Postfix on every SystemBase.Update; rebuilt by
-        // Scan() once per report cycle. Empty set, never null. Atomic
-        // reference swap is enough — both Scan() and the Postfix run on the
-        // main thread.
-        private static HashSet<Type> s_PatchedTypes = new HashSet<Type>();
-
-        /// <summary>
-        /// True if the given vanilla System type's <c>OnUpdate</c> currently
-        /// has a foreign Harmony prefix. Returns false for unknown types and
-        /// outside report cycles. O(1) hash lookup, safe to call from the
-        /// SystemBase.Update Postfix hot path.
-        /// </summary>
-        public static bool IsPatched(Type? type)
+        public sealed class ReplacementSnapshot
         {
-            if (type == null) return false;
-            return s_PatchedTypes.Contains(type);
+            public static readonly ReplacementSnapshot Empty =
+                new ReplacementSnapshot(new Dictionary<Type, Replacement>());
+
+            private readonly IReadOnlyDictionary<Type, Replacement> m_ByType;
+            private readonly IReadOnlyList<Replacement> m_Replacements;
+
+            internal ReplacementSnapshot(Dictionary<Type, Replacement> byType)
+            {
+                var copy = new Dictionary<Type, Replacement>(byType);
+                m_ByType = copy;
+
+                var ordered = new List<Replacement>(copy.Values);
+                ordered.Sort(static (a, b) => string.CompareOrdinal(a.VanillaSystem, b.VanillaSystem));
+                m_Replacements = ordered.ToArray();
+            }
+
+            public IReadOnlyDictionary<Type, Replacement> ByType => m_ByType;
+            public IReadOnlyList<Replacement> Replacements => m_Replacements;
+
+            /// <summary>
+            /// True if the given vanilla System type's <c>OnUpdate</c> had a
+            /// foreign Harmony prefix when this snapshot was scanned.
+            /// </summary>
+            public bool IsPatched(Type? type)
+                => type != null && m_ByType.ContainsKey(type);
         }
 
         public static void Reset()
         {
-            s_PatchedTypes = new HashSet<Type>();
         }
 
-        public static IReadOnlyList<Replacement> Scan()
+        public static ReplacementSnapshot Scan()
         {
-            var result = new List<Replacement>();
-            // Build the new patched-types set off to the side and swap it in
-            // atomically at the end. A live reader (SystemAutoProfiler.Postfix)
-            // either sees the previous full set or the new full set, never a
-            // half-populated one.
-            var freshTypes = new HashSet<Type>();
+            var result = new Dictionary<Type, Replacement>();
             try
             {
                 foreach (var world in World.All)
@@ -82,22 +94,19 @@ namespace VanillaProfiler.Diagnostics
                         string? owners = ResolveOnUpdatePrefixOwners(type);
                         if (owners == null) continue;
 
-                        freshTypes.Add(type);
-                        result.Add(new Replacement
-                        {
-                            VanillaSystem = type.FullName ?? type.Name,
-                            OwnerMod = owners,
-                        });
+                        if (result.ContainsKey(type)) continue;
+                        result[type] = new Replacement(
+                            type,
+                            type.FullName ?? type.Name,
+                            owners);
                     }
                 }
-                result.Sort((a, b) => string.CompareOrdinal(a.VanillaSystem, b.VanillaSystem));
             }
             catch (Exception ex)
             {
                 ModLog.Warn($"System replacement scan failed: {ex}");
             }
-            s_PatchedTypes = freshTypes;
-            return result;
+            return result.Count == 0 ? ReplacementSnapshot.Empty : new ReplacementSnapshot(result);
         }
 
         /// <summary>
@@ -150,11 +159,12 @@ namespace VanillaProfiler.Diagnostics
         /// snapshot, since this method runs once before any window has
         /// accumulated timing data.
         /// </summary>
-        public static void LogTo(IProfilerReadSurface profiler, IReadOnlyList<Replacement> replacements)
+        public static void LogTo(IProfilerReadSurface profiler, ReplacementSnapshot snapshot)
         {
-            if (profiler == null || replacements == null) return;
+            if (profiler == null || snapshot == null) return;
             try
             {
+                var replacements = snapshot.Replacements;
                 var sb = new StringBuilder();
                 sb.AppendLine();
                 sb.AppendLine($"PATCHED VANILLA SYSTEMS  —  {replacements.Count} found");

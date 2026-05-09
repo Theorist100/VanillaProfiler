@@ -27,7 +27,7 @@ VanillaProfiler (assembly)
 ├── ProfilerHost.cs             Static handle — Volatile.Read returning IProfilerPatchSurface or IProfilerReadSurface; the concrete Profiler type is not exposed.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic. Holds OverlayState for navigation.
 ├── ReportScheduler.cs          Owns frame-to-frame timing and report cadence; answers "is a report due now?".
-├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (self + inclusive main-thread cost).
+├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (self + inclusive main-thread cost) and asks IProfilerPatchSurface whether the current type is patched.
 ├── UpdateSystemPatch.cs        Harmony patch — measures phase boundaries (Pre/Post/Render).
 ├── EntityCommandBufferPatch.cs Harmony patch — times EntityCommandBuffer.Playback, including thrown playbacks via finalizer.
 ├── SimTickCounterSystem.cs     Counts simulation ticks (1 call per game tick).
@@ -52,10 +52,11 @@ VanillaProfiler (assembly)
                                ▼
                     ┌──────────────────────────────────────────┐
                     │  Profiler  (instance, held by ProfilerHost)│
-                    │  Patch entries (IProfilerPatchSurface):   │
-                    │   • OnFrame, OnSimTick                    │
-                    │   • RecordSystem, RecordPatchedVanilla    │
-                    │   • RecordPhase                           │
+│  Patch entries (IProfilerPatchSurface):   │
+│   • IsVanillaSystemPatched                │
+│   • OnFrame, OnSimTick                    │
+│   • RecordSystem, RecordPatchedVanilla    │
+│   • RecordPhase                           │
                     │  Delegates to:                            │
                     │   • ReportScheduler  (frame timing,       │
                     │                       report cadence)     │
@@ -109,7 +110,7 @@ Runs after every `SystemBase.Update`. Does:
 
 - Pop the thread-local measurement stack and compute `selfTicks = inclusiveTicks - childSystemUpdateTicks`
 - Resolve `Type` → `(name, isVanilla, modName)` once via `ModAttribution.Resolve` (cached)
-- For vanilla types, query `SystemReplacementDetector.IsPatched(Type)` (O(1) hash lookup, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime)
+- For vanilla types, query `IProfilerPatchSurface.IsVanillaSystemPatched(Type)` (O(1) lookup on the latest replacement snapshot, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime)
 - Route the elapsed delta:
   - **patched vanilla** → `Profiler.RecordPatchedVanilla` (independent of `ProfileVanillaSystems`; reports total/inclusive Update ms because the elapsed time blends mod prefix + vanilla original)
   - **plain vanilla** → `Profiler.RecordSystem` if `ProfileVanillaSystems = true`, else dropped
@@ -125,10 +126,12 @@ The result is cached per type. Cold-path scan happens once per type discovered; 
 
 ### `SystemReplacementDetector`
 
-Walks `World.All` once per report cycle, looking for vanilla systems whose `OnUpdate` has a foreign Harmony prefix. Maintains two outputs:
+Walks `World.All`, looking for vanilla systems whose `OnUpdate` has a foreign Harmony prefix. It deduplicates by system `Type` because the same system can appear in multiple worlds, then returns a `ReplacementSnapshot`.
 
-- **`IsPatched(Type)`** — O(1) hash-set probe used by `SystemAutoProfiler.Postfix` on the hot path. Atomically swapped on each scan; main-thread only, no volatile needed.
-- **`Scan()` result** — `List<Replacement>` consumed by `Profiler.Report` to build the `OverlaySnapshot.ReplacedVanillaSystems` array. Merged with `MetricsSample.PatchedVanillaSystems` (the per-cycle ms bucket) by full type name, so each row carries `(VanillaSystem, OwnerMod, TotalMs)`.
+- **`ReplacementSnapshot.IsPatched(Type)`** — O(1) dictionary probe used by `Profiler.IsVanillaSystemPatched`, which is exposed on the patch surface for `SystemAutoProfiler`.
+- **`ReplacementSnapshot.Replacements`** — sorted, deduplicated rows consumed by `Profiler.Report` to build `OverlaySnapshot.ReplacedVanillaSystems`. The rows are matched with `MetricsSample.PatchedVanillaSystems` by full type name, so each row carries `(VanillaSystem, OwnerMod, TotalMs)`.
+
+`Profiler` owns the currently published snapshot. Lifecycle boundaries (`InitializeFromCurrentMode`, `BeginLoading(true)`, `SetGameLoaded(true/false)`) reset and refresh it, and each report cycle scans at the beginning before `MetricsAggregator.Drain()`. `Profiler.IsVanillaSystemPatched(Type)` uses `Volatile.Read` and `RefreshReplacementSnapshot()` publishes with `Volatile.Write`, so a hot-path reader sees either the previous full snapshot or the new full snapshot, never a partially-built scan result.
 
 Why a separate bucket: a Harmony prefix can wrap or skip the original `OnUpdate`, so the elapsed time inside the patched `SystemBase.Update` is a blend of mod-prefix work and (possibly skipped) vanilla original. There is no Harmony hook between prefix and original to capture an intermediate timestamp. Surfacing the total `Update` ms is honest — the split is what's not measurable, not the cost itself.
 
@@ -199,7 +202,7 @@ The mod follows a **main-thread measurement** rule rather than scattering locks 
   - `OnSimTick` is called from `SimTickCounterSystem.OnUpdate` — ECS GameSimulation phase, main thread.
   - `RecordPhase` is called from the per-phase Postfix — main thread.
   - `RecordSystem` is called from `SystemBase.Update` Postfix — main thread.
-  - `RecordPatchedVanilla` is called from `SystemBase.Update` Postfix when `SystemReplacementDetector.IsPatched(type)` returns true — main thread.
+  - `RecordPatchedVanilla` is called from `SystemBase.Update` Postfix when `IProfilerPatchSurface.IsVanillaSystemPatched(type)` returns true — main thread.
   - `ReportScheduler`, `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report` and lifecycle boundary resets.
   - `LastSnapshot` and `LastHealth` are written by `Report` and read by `ProfilerOverlay.OnGUI` — both main thread.
   - `OverlayState` (mode index, anchor) is written and read by `ProfilerOverlay` only — main thread.

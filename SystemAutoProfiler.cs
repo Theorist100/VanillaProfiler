@@ -124,16 +124,17 @@ namespace VanillaProfiler
                 // vanilla original — Harmony does not expose a hook between
                 // them — but the total ms is honest, and surfacing it is the
                 // whole point of the Patched vanilla systems section. We
-                // re-check the membership every call (instead of caching on
-                // SystemInfo) because mod-options screens can flip Harmony
-                // patches at runtime; SystemReplacementDetector rebuilds the
-                // set once per report cycle.
+                // Re-check the membership every call (instead of caching on
+                // SystemInfo) against the snapshot published by Profiler.
+                // Mod-options screens can flip Harmony patches at runtime;
+                // Profiler refreshes the snapshot at lifecycle boundaries and
+                // at the start of each report cycle.
                 var profiler = ProfilerHost.TryGetPatchSurface();
                 if (profiler == null) return;
 
                 if (info.IsVanilla)
                 {
-                    if (SystemReplacementDetector.IsPatched(type))
+                    if (profiler.IsVanillaSystemPatched(type))
                     {
                         profiler.RecordPatchedVanilla(info.Name, selfTicks, elapsed);
                         return;

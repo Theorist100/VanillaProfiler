@@ -80,21 +80,21 @@ Signature touches: 1 px gold border on all four sides, 3 px gold accent strip on
 
 ## Thread safety
 
-Profiler measurement state is **main-thread only**. The patch surface (`IProfilerPatchSurface`) called from Harmony patches and ECS counter systems exposes `OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`; the read/control surface (`IProfilerReadSurface`) used by overlay/export/lifecycle is separate. `ProfilerHost` only exposes the live `Profiler` through these two interfaces — the concrete type cannot leak across patch/read boundaries. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
+Profiler measurement state is **main-thread only**. The patch surface (`IProfilerPatchSurface`) called from Harmony patches and ECS counter systems exposes `IsVanillaSystemPatched`, `OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`; the read/control surface (`IProfilerReadSurface`) used by overlay/export/lifecycle is separate. `ProfilerHost` only exposes the live `Profiler` through these two interfaces — the concrete type cannot leak across patch/read boundaries. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
 
 Everything else is **main-thread only**:
 - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread (rendering always is)
 - `OnSimTick` from `SimTickCounterSystem.OnUpdate` — ECS sim phase, main thread
 - `RecordPhase` from per-phase Postfix — main thread
 - `RecordSystem` from `SystemBase.Update` Postfix — main thread
-- `RecordPatchedVanilla` from `SystemBase.Update` Postfix when `SystemReplacementDetector.IsPatched(type)` returns true — main thread
+- `RecordPatchedVanilla` from `SystemBase.Update` Postfix when `IProfilerPatchSurface.IsVanillaSystemPatched(type)` returns true — main thread
 - `MemorySampler`, `MemoryHistory`, `FpsSparkline`, `CityContext` — touched only from `OnFrame`/`Report`/ECS update on the main thread
 - `LastSnapshot` / `LastHealth` written by `Report` and read by overlay — both main thread
 - `OverlayState` (UI navigation: mode index, anchor) — written and read on the main thread by `ProfilerOverlay`
 
 Session lifecycle is centralized in `ProfilerSessionState`. Do not reset measurement fields directly from lifecycle callbacks; route load/unload/dispose through `Profiler.ResetForBoundary(SessionBoundary)` so metrics, public snapshots, memory history, recorder windows, graphics probes, replacement scans and city context reset together. `Mod.OnLoad` also calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` so hot-reload inside an already loaded city does not wait for a future load callback.
 
-`SystemReplacementDetector.s_PatchedTypes` is a static `HashSet<Type>` published by `Scan()` (called from `Profiler.Report` once per cycle) and read by the `SystemAutoProfiler.Postfix` hot path. Both run main-thread, so the swap is a plain reference assignment — no `volatile` needed. A live reader sees either the previous full set or the new full set, never a half-populated one (the new set is built off to the side and assigned at the end of `Scan()`).
+`SystemReplacementDetector.Scan()` returns a deduplicated `ReplacementSnapshot`. `Profiler` owns the currently published snapshot, refreshes it at lifecycle boundaries and at the start of every report cycle, and exposes `IsVanillaSystemPatched(Type)` on `IProfilerPatchSurface` for `SystemAutoProfiler`. Snapshot reads/writes use `Volatile.Read`/`Volatile.Write`; a hot-path reader sees either the previous full snapshot or the new full snapshot, never a half-populated scan.
 
 Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a surface via `ProfilerHost.TryGetPatchSurface()` will no-op.
 

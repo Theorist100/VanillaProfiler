@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using Game;
 using VanillaProfiler.Aggregation;
 using VanillaProfiler.Diagnostics;
@@ -38,6 +39,8 @@ namespace VanillaProfiler
         private readonly SpikeScreenshot m_SpikeScreenshots = new();
         private readonly GraphicsSettingsProbe m_GraphicsSettings = new();
         private readonly ProfilerSessionState m_Session = new();
+        private SystemReplacementDetector.ReplacementSnapshot m_Replacements =
+            SystemReplacementDetector.ReplacementSnapshot.Empty;
 
         // Frame timing — main thread only
         private int m_ReportCount;
@@ -60,6 +63,8 @@ namespace VanillaProfiler
         public bool IsLoading => m_Session.IsLoading;
         public bool IsSettling => m_Session.IsSettling;
         public bool ShouldProfileVanillaSystems => m_Settings().Settings.ProfileVanillaSystems;
+        public bool IsVanillaSystemPatched(Type type)
+            => Volatile.Read(ref m_Replacements).IsPatched(type);
 
         private float ReportInterval => m_Settings().Settings.ReportIntervalSec;
 
@@ -90,6 +95,7 @@ namespace VanillaProfiler
             ResetForBoundary(m_Session.IsSettling
                 ? SessionBoundary.GameLoaded
                 : SessionBoundary.GameUnloaded);
+            RefreshReplacementSnapshot();
             if (m_Session.IsSettling)
                 PrepareLoadedGameSession();
         }
@@ -102,6 +108,7 @@ namespace VanillaProfiler
             if (!m_Session.SetGameLoaded(gameLoaded)) return;
 
             ResetForBoundary(gameLoaded ? SessionBoundary.GameLoaded : SessionBoundary.GameUnloaded);
+            RefreshReplacementSnapshot();
             if (m_Session.IsSettling)
                 PrepareLoadedGameSession();
         }
@@ -118,6 +125,7 @@ namespace VanillaProfiler
 
             if (!m_Session.BeginLoading()) return;
             ResetForBoundary(SessionBoundary.BeginLoading);
+            RefreshReplacementSnapshot();
         }
 
         // ---------- Hot-path recording ----------
@@ -198,10 +206,13 @@ namespace VanillaProfiler
 
             if (!IsGameLoaded)
             {
+                RefreshReplacementSnapshot();
                 m_Memory.Sample(elapsedSec);
                 using (m_Metrics.Drain()) { }
                 return;
             }
+
+            var replacements = RefreshReplacementSnapshot();
 
             // Deferred Harmony scan once other mods finish patching
             if (!m_HarmonyScanned)
@@ -225,16 +236,17 @@ namespace VanillaProfiler
                 MemoryHistory.Record(memory.ManagedBytes, elapsedSec);
 
                 var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
-                AttachReplacementSnapshot(snapshot, metrics);
+                AttachReplacementSnapshot(snapshot, metrics, replacements);
                 PublishSnapshot(snapshot, health);
                 WriteReports(metrics, memory, snapshot, health);
             }
         }
 
-        private void AttachReplacementSnapshot(OverlaySnapshot snapshot, MetricsSample metrics)
+        private void AttachReplacementSnapshot(
+            OverlaySnapshot snapshot,
+            MetricsSample metrics,
+            SystemReplacementDetector.ReplacementSnapshot replacements)
         {
-            // Run every cycle; mods may toggle Harmony patches at runtime.
-            var replacements = SystemReplacementDetector.Scan();
             snapshot.ReplacedVanillaSystems = ToTuples(replacements, metrics.PatchedVanillaSystems);
             if (m_ReplacementsLogged) return;
             m_ReplacementsLogged = true;
@@ -268,9 +280,10 @@ namespace VanillaProfiler
         }
 
         private static (string, string, double)[] ToTuples(
-            System.Collections.Generic.IReadOnlyList<SystemReplacementDetector.Replacement>? list,
+            SystemReplacementDetector.ReplacementSnapshot snapshot,
             System.Collections.Generic.IReadOnlyDictionary<string, Aggregation.PhaseData>? patchedMs)
         {
+            var list = snapshot.Replacements;
             if (list == null || list.Count == 0) return Array.Empty<(string, string, double)>();
             var arr = new (string, string, double)[list.Count];
             for (int i = 0; i < list.Count; i++)
@@ -292,6 +305,7 @@ namespace VanillaProfiler
             FpsSparkline.Reset();
             m_SpikeScreenshots.Reset();
             m_GraphicsSettings.Invalidate();
+            Volatile.Write(ref m_Replacements, SystemReplacementDetector.ReplacementSnapshot.Empty);
             SystemReplacementDetector.Reset();
             switch (kind)
             {
@@ -310,8 +324,14 @@ namespace VanillaProfiler
 
         private void PrepareLoadedGameSession()
         {
-            SystemReplacementDetector.Scan();
             MemoryHistory.SuppressNextReports(5);
+        }
+
+        private SystemReplacementDetector.ReplacementSnapshot RefreshReplacementSnapshot()
+        {
+            var snapshot = SystemReplacementDetector.Scan();
+            Volatile.Write(ref m_Replacements, snapshot);
+            return snapshot;
         }
 
     }

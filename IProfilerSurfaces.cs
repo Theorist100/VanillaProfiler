@@ -1,3 +1,4 @@
+using System;
 using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler
@@ -10,6 +11,7 @@ namespace VanillaProfiler
     {
         bool ShouldProfileVanillaSystems { get; }
 
+        bool IsVanillaSystemPatched(Type type);
         void OnSimTick();
         void OnFrame();
         void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName = null);
