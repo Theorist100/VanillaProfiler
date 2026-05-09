@@ -68,20 +68,16 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 2. Find `CSII_Report_*.zip` and `CSII_Report_*.txt` in your Reports folder
 3. Attach the `.zip` when possible, otherwise attach the `.txt` — it includes system info, loaded mods, current settings, the latest report window, top mods, and the last 50 lines of VanillaProfiler.log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
-  <ModVersion Value="1.6.0" />
+  <ModVersion Value="1.6.1" />
   <GameVersion Value="*" />
   <AccessLevel Value="Public" />
   <Tag Value="Code Mod" />
-  <ChangeLog>Session lifecycle is now token-based: each window carries an explicit session/load id, duplicate settling callbacks no-op, and dispose no longer cycles recorders through a boundary reset.
-Reports drain metrics with the replacement and settings context that was active for that window, then prepare the next context after writing — old samples can no longer be labelled with state scanned afterwards.
-Patched-vanilla detection now treats prefixes, postfixes, transpilers and finalizers as replacement evidence, and Harmony owner ids are tracked separately from patch assembly identity.
-Mod attribution rebuilt around structured origin/confidence data; trusted vanilla owners are not downgraded by hot-path fallbacks.
-System, ECB and UpdateSystem patch timings use explicit started/completed measurement tokens, so default Harmony state cannot produce fake samples.
-Overlay rebuilt around a semantic command contract with stable persisted mode ids; long Details/Engine/Recommendations bodies scroll under a fixed header, and Reset Defaults returns manual panel positions to the anchor preset.
-Spike screenshots are now off by default — enable them with Ctrl+F7 or in Settings when you need capture evidence for repeated stutters.
-Tips no longer suggest Max Frame Latency for true GPU-bound or present-wait cases; that advice is now reserved for CPU-render-bound GPU underutilization.
-Engine counter UI shows n/a for unavailable Unity profiler markers instead of confusing them with real zero values, and counter availability is surfaced in support exports.
-Long pauses now reset the managed-memory leak window instead of clamping elapsed time into a false growth rate.
-Harmony conflict log refreshes when the patch signature changes, instead of being logged once per session.</ChangeLog>
+  <ChangeLog>Internal refactoring of profiler architecture — no behavior changes for end users.
+
+Report building, health classification, graphics settings reflection, and metrics bucket ownership are now explicit components with typed measurements, typed metrics buckets, typed overlay rows, immutable health reports, and typed recorder values; aggregation, output, and overlay code no longer pass loosely related string/bool/value tuples.
+Overlay main panel renderer and settings draft are split into separate components.
+Report formatting and log tail reading are split into independent modules.
+Memory recorders are extracted into a dedicated MemoryRecorderSet.
+Mod attribution responsibilities are split across smaller focused components.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.1
+
+### Internal
+
+- Refactored profiler architecture into smaller focused components. Report building, health classification, graphics settings reflection, and metrics bucket ownership are now explicit components with typed measurements, typed metrics buckets, typed overlay rows, immutable health reports, and typed recorder values. No behavior changes for end users.
+- Split overlay main panel renderer and settings draft into separate components.
+- Split report formatting and log tail reading into independent modules.
+- Extracted memory recorders into a dedicated `MemoryRecorderSet`.
+- Split mod attribution responsibilities across smaller focused components.
+
 ## 1.6.0
 
 ### Added
