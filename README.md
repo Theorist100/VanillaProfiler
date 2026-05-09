@@ -11,12 +11,12 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 - Memory leak detector — flags sustained managed-heap growth across the recent window
 - Bottleneck verdict (RenderBound / SimBound / MemoryBound / Balanced) with concrete next step
 - Auto-screenshots on frame spikes
-- Ctrl+F11 export — one-click support file (system info, mods, stats, log tail) to send to mod authors
+- Ctrl+F11 export — one-click support report plus bounded support bundle (system info, mods, stats, settings, log tail) to send to mod authors
 
 ## For mod authors and power users
 
 - Details overlay — per-system main-thread cost (vanilla vs each mod), FPS sparkline, top mods/systems
-- Engine overlay — raw Unity engine counters with PresentWait for honest GPU-bound detection (the "98% GPU" trap is documented in `Docs/Reference/API/CS2_Profiling_API.md`)
+- Engine overlay — raw Unity engine counters with PresentWait for honest GPU-bound detection (so the "98 % GPU" trap doesn't fool the bottleneck verdict). Counters that the build does not expose render as `n/a` instead of a misleading zero.
 - Sync-point flagging — Update() calls above SyncPointThresholdMs (default 0.5 ms) tagged `[likely sync point]` in the log; per-system suspect-call counter
 - ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
 - Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas, render counts, GC stall sums
@@ -42,12 +42,15 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 ```
 .
 ├── Mod.cs                              IMod entrypoint, Harmony patches, system registration
-├── Profiler.cs                         Instance facade — owns aggregator, sampler, builder, sinks
+├── Profiler.cs                         Instance facade — implements IProfilerHotPath, owns aggregator, sampler, builder, sinks
+├── IProfilerHotPath.cs                 Narrow interface exposed to Harmony patches and ECS counter systems
 ├── ProfilerHost.cs                     Static handle to the live Profiler instance (Volatile.Read)
 ├── ProfilerLifecycleState.cs           Lifecycle enum: NoCity / LoadingCity / Settling / Active
 ├── ProfilerOverlay.cs                  MonoBehaviour shell — picks an IOverlayMode, draws panel
+├── ReportScheduler.cs                  Owns frame-to-frame timing and report cadence
 ├── SystemAutoProfiler.cs               Harmony patch on SystemBase.Update — covers ~300 systems
 ├── UpdateSystemPatch.cs                Phase timing (Pre/PostSimulation, Rendering, etc.)
+├── EntityCommandBufferPatch.cs         Harmony patch on EntityCommandBuffer.Playback (with finalizer for thrown playbacks)
 ├── SimTickCounterSystem.cs             Sim tick counter (1 call per game tick)
 ├── CityContextSystem.cs                Citizen/vehicle/building counts, refreshed every 5 s
 ├── MainThreadGuard.cs                  Asserts main-thread invariants on hot-path entries
@@ -63,11 +66,15 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── MemorySample.cs                 Memory snapshot model
 │   ├── PhaseData.cs                    Per-key accumulator (total/max/calls)
 │   ├── ReportBuilder.cs                Pure (sample + memory + history) → snapshot + health
-│   ├── OverlaySnapshot.cs              Immutable view exposed to overlay/exporter
+│   ├── OverlaySnapshot.cs              Immutable view exposed to overlay/exporter (carries counter-availability flags)
+│   ├── ProfilerRecorderFactory.cs      Resolves Unity profiler markers by category+stat name via ProfilerRecorderHandle
+│   ├── ProfilerRecorderSamples.cs      Reusable sample buffer so recorder reads do not allocate per report
 │   └── MarkerEnumerator.cs             One-shot dump of available ProfilerRecorder markers at startup
 ├── Output/
 │   ├── IReportSink.cs                  Interface for reporting destinations
-│   └── LogFileSink.cs                  Writes VanillaProfiler.log
+│   ├── LogFileSink.cs                  Writes VanillaProfiler.log
+│   ├── ReportDispatcher.cs             Cold-path fan-out to sinks with per-sink failure isolation
+│   └── AtomicFileWriter.cs             Temp-file + rename helper for crash-safe writes
 ├── Overlay/
 │   ├── IOverlayMode.cs                 Mode contract — adding a mode is purely additive (OCP)
 │   ├── OverlayTheme.cs                 Classic Gold palette + cached GUIStyles
@@ -75,6 +82,7 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── OverlayFormat.cs                Pure formatting helpers
 │   ├── OverlayInputHandler.cs          Ctrl+F-key polling → semantic events
 │   ├── OverlayBadges.cs                Hidden / Standby / Settling badges (small fixed pills)
+│   ├── OverlayState.cs                 UI navigation state (mode index, anchor) separated from drawing
 │   ├── DrawContext.cs                  Cursor + theme bundle passed to mode renderers
 │   ├── Toast.cs                        Bottom-of-screen status messages
 │   ├── Anchor.cs                       Screen-corner enum + Cycle/ShortName extensions
@@ -83,6 +91,7 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── MainPanelButtons.cs             Bottom button block — mode tabs + action row + hint
 │   ├── SettingsPanel.cs                Ctrl+F8 panel using draft-then-apply pattern
 │   ├── SettingsWidgets.cs              Stateless DrawTextField / DrawSegmented helpers
+│   ├── SettingsValidation.cs           Bounds and sanity checks for the draft before apply
 │   ├── SettingsDraft.cs                Clone(ProfilerSettings) helper for the draft pattern
 │   └── Modes/
 │       ├── HiddenMode.cs               No-op mode
@@ -99,10 +108,15 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
     ├── SpikeScreenshot.cs              Frame > threshold → ScreenCapture, throttled
     ├── HarmonyConflictDetector.cs      Lists multi-owner patches involving VanillaProfiler
     ├── SystemReplacementDetector.cs    Lists vanilla OnUpdate methods prefixed by other mods
+    ├── GraphicsSettingsProbe.cs        Reads CS2 graphics settings (LOD, volumetrics, etc.) for recommendations
+    ├── Recommendation.cs               DTO for a single recommendation (level + title + reason + action)
+    ├── RecommendationEngine.cs         Builds recommendations from health + snapshot + probed settings
     ├── CityContext.cs                  Static snapshot of in-game entity counts
-    ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt with system info & log tail
+    ├── ReportExporter.cs               Ctrl+F11 → CSII_Report_*.txt + bounded CSII_Report_*.zip support bundle
+    ├── ReportTextSections.cs           Shared text sections (counter availability, top tables) for export and log
     ├── ProfilerSettings.cs             User-preferences DTO with Clamp() — no I/O of its own
-    └── SettingsStore.cs                Load / Save / Current — atomic .tmp+.bak write protocol
+    ├── ProfilerSettingsSnapshot.cs     Immutable point-in-time settings view passed through hot/cold boundaries
+    └── SettingsStore.cs                Load / Save / Current / Snapshot — atomic .tmp+.bak write protocol
 ```
 
 ## Output locations
@@ -111,6 +125,7 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 |---|---|
 | Continuous log | `<persistentDataPath>/Logs/VanillaProfiler.log` |
 | Diagnostic reports | `<persistentDataPath>/Reports/CSII_Report_*.txt` |
+| Support bundles | `<persistentDataPath>/Reports/CSII_Report_*.zip` |
 | Spike screenshots | `<persistentDataPath>/Logs/spikes/spike_*.png` |
 | Settings | `<persistentDataPath>/VanillaProfiler/settings.json` |
 

@@ -15,13 +15,19 @@ Output deploys to `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Mods\Vani
 The flow is always: collect → classify → render. Pick where you plug in:
 
 ### Per-frame metric (single-threaded)
-Hook into `Profiler.OnFrame` (called from `UpdateSystemPatch` Rendering phase, main thread). Add an instance accumulator field on `Profiler` directly — no lock needed because `OnFrame` is main-thread only. Drain and reset it in `Profiler.Report()`. Add a field to `OverlaySnapshot`, fill it in `ReportBuilder.Build`, render it in an `IOverlayMode` implementation.
+Hook into `Profiler.OnFrame` (called from `UpdateSystemPatch` Rendering phase, main thread). Frame timing and report cadence are owned by `ReportScheduler` — do not duplicate that logic. Add an instance accumulator field on `Profiler` directly — no lock needed because `OnFrame` is main-thread only. Drain and reset it in `Profiler.Report()`. Add a field to `OverlaySnapshot`, fill it in `ReportBuilder.Build`, render it in an `IOverlayMode` implementation.
 
 ### Per-system metric (main-thread)
-Add a method on `MetricsAggregator` and expose it via a delegating `Profiler.RecordX(...)` method from the Harmony patch. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
+Add a method on `MetricsAggregator` and expose it via a delegating method on `Profiler`. If the new method is called from a Harmony patch or ECS system, also add it to `IProfilerHotPath` so the hot-path contract stays explicit. Keep it allocation-free and do not add locks: `SystemBase.Update` patches are expected to run on the Unity main thread, and `MainThreadGuard` enforces that contract.
 
 ### Per-report metric
 If you only need a value once per report (e.g. a rare query), add it directly inside `Profiler.Report()` after `MetricsAggregator.Drain()`. Main-thread context — touch instance fields freely.
+
+### Report sink
+Implement `IReportSink` and pass an instance into `Profiler` via `Mod.OnLoad` (`new Profiler(new IReportSink[] { ..., yourSink })`). `ReportDispatcher` isolates per-sink failures, so your sink may throw without breaking other sinks.
+
+### Settings access
+Inside runtime services, prefer the immutable `ProfilerSettingsSnapshot` (read once via `SettingsStore.Snapshot`) over `SettingsStore.Current` to keep settings reads explicit and consistent across a frame.
 
 ### Health / bottleneck rule
 Add a constant threshold in `HealthClassifier`. Add a field to `HealthReport`. Update `Classify()`. Render the new field in the appropriate `IOverlayMode` implementation (`StatusMode` for player-facing, `DetailsMode` for power users).
@@ -41,7 +47,7 @@ Use `UnityEngine.Time.realtimeSinceStartup` explicitly — `Time` alone collides
 
 ## Visual style
 
-The overlay uses the **Classic Gold** palette from `CivicSurvival/UI/src/themes/classicGold.ts`. If you change colours, mirror the source theme; consistency between in-game UI and the profiler matters.
+The overlay uses the **Classic Gold** palette. Keep colours consistent with the table below when adding new UI elements.
 
 | Element | Colour | Hex |
 |---|---|---|
@@ -69,12 +75,12 @@ Signature touches: 1 px gold border on all four sides, 3 px gold accent strip on
 
 - **Pre/Postfix on `SystemBase.Update`** — covers the entire system update loop. `SystemBase.OnUpdate` is abstract and can't be patched directly. `ComponentSystemBase.Update` is also abstract — don't try.
 - **Always wrap patch bodies in `try { } catch { }`.** A single throw inside a postfix can crash the whole game.
-- **Don't do structural ECS changes from a patch.** No `EntityManager.AddComponent`, no `SetSharedComponent`, no `RemoveComponent` from inside a patch on a rendering or simulation system. Reads only. (See `Mods/CivicSurvival` history for the crashes that followed when this rule was broken.)
+- **Don't do structural ECS changes from a patch.** No `EntityManager.AddComponent`, no `SetSharedComponent`, no `RemoveComponent` from inside a patch on a rendering or simulation system. Reads only.
 - **Don't allocate in the hot path.** No `string.Format`, no LINQ, no `new()` in a per-frame patch. Cache everything in `OnCreate` or via static dictionaries.
 
 ## Thread safety
 
-Profiler measurement state is **main-thread only**. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and is expected to run on the Unity main thread; it records into `MetricsAggregator` without locking.
+Profiler measurement state is **main-thread only**. The hot-path entry points called from Harmony patches and ECS systems are formalised in `IProfilerHotPath` (`OnSimTick`, `OnFrame`, `RecordSystem`, `RecordPatchedVanilla`, `RecordPhase`); when adding a new hot-path method, add it there too so the surface stays explicit. `Profiler.RecordSystem` is called from the `SystemBase.Update` Postfix patch and records into `MetricsAggregator` without locking.
 
 Everything else is **main-thread only**:
 - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread (rendering always is)
@@ -84,6 +90,7 @@ Everything else is **main-thread only**:
 - `RecordPatchedVanilla` from `SystemBase.Update` Postfix when `SystemReplacementDetector.IsPatched(type)` returns true — main thread
 - `MemorySampler`, `MemoryHistory`, `FpsSparkline`, `CityContext` — touched only from `OnFrame`/`Report`/ECS update on the main thread
 - `LastSnapshot` / `LastHealth` written by `Report` and read by overlay — both main thread
+- `OverlayState` (UI navigation: mode index, anchor) — written and read on the main thread by `ProfilerOverlay`
 
 `SystemReplacementDetector.s_PatchedTypes` is a static `HashSet<Type>` published by `Scan()` (called from `Profiler.Report` once per cycle) and read by the `SystemAutoProfiler.Postfix` hot path. Both run main-thread, so the swap is a plain reference assignment — no `volatile` needed. A live reader sees either the previous full set or the new full set, never a half-populated one (the new set is built off to the side and assigned at the end of `Scan()`).
 

@@ -20,7 +20,7 @@ All shortcuts use **Ctrl + F-key** so they don't collide with vanilla Cities: Sk
 | **Ctrl+F8** | Open / close settings panel |
 | **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Tips → Details → Engine → Hide |
 | **Ctrl+F10** | Force an immediate report dump to `VanillaProfiler.log` |
-| **Ctrl+F11** | Export full diagnostic report (support file) to `Reports/CSII_Report_*.txt` |
+| **Ctrl+F11** | Export full diagnostic report to `Reports/CSII_Report_*.txt` and a bounded support bundle to `Reports/CSII_Report_*.zip` |
 | **Ctrl+F12** | Cycle overlay position: Top-Left → Top-Right → Bottom-Right → Bottom-Left |
 
 ## Overlay modes
@@ -110,6 +110,7 @@ Process RSS:    7906 MB
 ```
 
 Reading guide:
+- `n/a` means the Unity recorder marker is unavailable in this game build, not that the value is zero.
 - **Present wait** is the real GPU-bound signal. >30 % of the frame ⇒ CPU sits idle waiting on the GPU; lowering graphics quality helps. Near-zero with high CPU main ⇒ CPU bottleneck, ECS is the place to optimise.
 - **SetPass** spike ⇒ shader-state churn (lots of material/keyword variance).
 - **GPU memory split** lets you tell a buffer leak from a render-target leak.
@@ -144,14 +145,17 @@ A red **MEMORY** with a `LEAK SUSPECTED: +120 MB over 30s` hint means managed me
 ## Sharing a bug report
 
 1. Press **Ctrl+F11** while the lag is happening (or right after).
-2. Find the file: `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Reports\CSII_Report_*.txt`
-3. Attach it to your bug report (Discord, GitHub, forum). It contains:
+2. Find the files: `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Reports\CSII_Report_*.txt` and, when created, `CSII_Report_*.zip`.
+3. Attach the `.zip` when possible; otherwise attach the `.txt`. It contains:
    - System info (CPU / GPU / RAM / OS)
    - Loaded mods
    - Latest report window (FPS, memory, bottleneck, leak status)
+   - Counter availability, so missing Unity markers are visible
+   - Recommendation reasons
    - City context (citizens / vehicles / buildings)
    - Top mods, top systems
    - Last 50 lines of `VanillaProfiler.log`
+   - The zip also includes current settings and a size-limited log copy
 
 If the issue is repeated stutter (not just "feels slow"), enable **Ctrl+F7 spike screenshots** — frames over 100 ms (configurable in settings) will be saved to `Logs/spikes/`. Attach those too.
 

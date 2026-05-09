@@ -15,34 +15,48 @@ Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) c
 ```
 VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
-├── Profiler.cs                 Main-thread coordinator. Owns sinks, sampler, builder, snapshots.
-├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic.
+├── Profiler.cs                 Main-thread coordinator. Implements IProfilerHotPath; delegates timing to ReportScheduler and sink fan-out to ReportDispatcher.
+├── IProfilerHotPath.cs         Narrow interface exposed to Harmony patches and ECS counter systems (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase).
+├── ProfilerHost.cs             Static handle — Volatile.Read of the live Profiler instance.
+├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic. Holds OverlayState for navigation.
+├── ReportScheduler.cs          Owns frame-to-frame timing and report cadence; answers "is a report due now?".
 ├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (main-thread cost).
 ├── UpdateSystemPatch.cs        Harmony patch — measures phase boundaries (Pre/Post/Render).
-├── EntityCommandBufferPatch.cs Harmony patch — times EntityCommandBuffer.Playback (always main-thread).
+├── EntityCommandBufferPatch.cs Harmony patch — times EntityCommandBuffer.Playback, including thrown playbacks via finalizer.
 ├── SimTickCounterSystem.cs     Counts simulation ticks (1 call per game tick).
 ├── CityContextSystem.cs        ECS — refreshes citizen/vehicle/building counts every 5 s.
-└── Diagnostics/                Pure-logic helpers, no Harmony, no Unity API except where noted.
+├── Aggregation/                Sample collection and snapshot construction. Single-threaded buffers.
+├── Diagnostics/                Pure-logic helpers, no Harmony, no Unity API except where noted.
+├── Output/                     Report sinks and dispatcher (per-sink failure isolation).
+└── Overlay/                    IMGUI panels, modes, theme, settings UI, navigation state.
 ```
 
 ## Data flow
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │ Harmony patches                              │
-                    │  • SystemBase.Update         (per system)    │
-                    │  • UpdateSystem.Update       (per phase)     │
-                    └──────────┬─────────────────────┬─────────────┘
-                               │ Stopwatch deltas    │
-                               ▼                     ▼
+                    │ Harmony patches  +  ECS counter systems     │
+                    │  • SystemBase.Update         (per system)   │
+                    │  • UpdateSystem.Update       (per phase)    │
+                    │  • EntityCommandBuffer.Playback (ECB time)  │
+                    │  • SimTickCounterSystem      (per sim tick) │
+                    └──────────┬──────────────────────────────────┘
+                               │ Stopwatch deltas via IProfilerHotPath
+                               ▼
                     ┌──────────────────────────────────────────┐
                     │  Profiler  (instance, held by ProfilerHost)│
-                    │  Delegates to:                             │
-                    │   • MetricsAggregator (single-threaded)    │
-                    │   • MemorySampler                          │
-                    │   • MemoryHistory + FpsSparkline           │
+                    │  Hot-path entries (IProfilerHotPath):     │
+                    │   • OnFrame, OnSimTick                    │
+                    │   • RecordSystem, RecordPatchedVanilla    │
+                    │   • RecordPhase                           │
+                    │  Delegates to:                            │
+                    │   • ReportScheduler  (frame timing,       │
+                    │                       report cadence)     │
+                    │   • MetricsAggregator (single-threaded)   │
+                    │   • MemorySampler                         │
+                    │   • MemoryHistory + FpsSparkline          │
                     └──────────┬───────────────────────────────┘
-                               │ every REPORT_INTERVAL
+                               │ ReportScheduler signals "report due"
                                ▼
                     ┌──────────────────────────────────────────┐
                     │            Profiler.Report()             │
@@ -50,19 +64,22 @@ VanillaProfiler (assembly)
                     │  2. MemorySampler.Sample()               │
                     │  3. MemoryHistory.Record                 │
                     │  4. ReportBuilder → snapshot + health    │
-                    │  5. Foreach IReportSink: WriteReport     │
-                    │  6. Update LastSnapshot, LastHealth      │
+                    │  5. AttachReplacementSnapshot            │
+                    │  6. PublishSnapshot (LastSnapshot/Health)│
+                    │  7. ReportDispatcher.WriteReport         │
                     └──────────┬─────────────────┬─────────────┘
                                │                 │
                                ▼                 ▼
                     ┌──────────────────┐  ┌──────────────────┐
-                    │ LogFileSink      │  │  ProfilerOverlay │
-                    │ (VanillaProfiler.log│  │  reads LastSnap  │
-                    │  via StreamWriter)│  │  and LastHealth  │
+                    │ ReportDispatcher │  │  ProfilerOverlay │
+                    │  per-sink try/   │  │  reads LastSnap  │
+                    │  catch isolation │  │  and LastHealth  │
+                    │  → IReportSink[] │  │                  │
+                    │   • LogFileSink  │  │                  │
                     └──────────────────┘  └──────────────────┘
 ```
 
-`Profiler` is an **instance** owned by `VanillaProfilerMod` and reachable via the static `ProfilerHost.TryGet()`. Measurement entry points (`OnFrame`, `OnSimTick`, `RecordPhase`, `RecordSystem`, `Report`) are main-thread only; `MainThreadGuard` asserts that contract. `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
+`Profiler` is an **instance** owned by `VanillaProfilerMod` and reachable via the static `ProfilerHost.TryGet()`. The hot-path surface called from Harmony patches and ECS systems is formalised in `IProfilerHotPath`; `MainThreadGuard` asserts the main-thread contract on those entries. `MetricsAggregator` is therefore a single-threaded accumulator with borrowed dictionaries, not a thread-safe container.
 
 ## Key contracts
 
@@ -70,12 +87,12 @@ VanillaProfiler (assembly)
 
 Called from the **Rendering** phase Harmony patch (`UpdateSystemPatch`). One call per render frame. Responsibilities:
 
-1. Compute frame delta from previous timestamp
+1. Ask `ReportScheduler.TryAdvanceFrame` for the frame delta and the "report due" flag
 2. Detect spikes (`> SPIKE_30FPS_MS` / `> SPIKE_20FPS_MS`)
 3. Push the frame into `FpsSparkline` and `SpikeScreenshot`
-4. Trigger `Report()` when `s_ReportTimer` exceeds `ReportIntervalSec`
+4. Call `Report()` when `ReportScheduler` signals the cadence has elapsed
 
-The split between "what happens every frame" and "what happens every report" matters: the per-frame work is critical-path; everything else (table sorting, file writes, classification) is amortised every 5 s.
+`ReportScheduler` owns frame-to-frame timing and the report timer — `Profiler` does not hold those fields directly. The split between "what happens every frame" and "what happens every report" matters: the per-frame work is critical-path; everything else (table sorting, file writes, classification) is amortised every 5 s.
 
 ### `SystemAutoProfiler.Postfix`
 
@@ -109,7 +126,7 @@ Why a separate bucket: a Harmony prefix can wrap or skip the original `OnUpdate`
 
 Sliding window of 12 samples (≈ 60 s at 5 s reporting). Leak detection requires a full 5-sample window so a single one-off allocation doesn't trip the alarm. The metric used is the **median** delta per report — robust against single outliers.
 
-`WindowSeconds` is computed against `ProfilerSettings.Current.ReportIntervalSec` so changing the report cadence at runtime keeps the displayed text honest.
+`MemoryHistory` receives a `Func<ProfilerSettingsSnapshot>` accessor at construction; `WindowSeconds` is computed against the snapshot's `ReportIntervalSec` so changing the report cadence at runtime keeps the displayed text honest.
 
 ### `HealthClassifier`
 
@@ -121,6 +138,29 @@ Pure function: `(snapshot, memoryHistory, simPhaseMs, renderPhaseMs) → HealthR
 - Bottleneck verdict (RENDER / SIM / MEMORY / BALANCED) with a one-line hint
 
 The bottleneck logic uses **average phase ms per call** — derived from exact phase-key lookups for `UpdateSystem.GameSimulation` and `UpdateSystem.Rendering`.
+
+### `ReportDispatcher`
+
+Cold-path fan-out to `IReportSink[]`. Wraps each sink in its own `try/catch` so a misbehaving sink (disk full, AV scan locking the file) cannot abort delivery to the others. Failures are logged at `Warn` level via `VanillaProfilerMod.Log`. `Profiler.Report` calls `ReportDispatcher.WriteReport`; system messages route through `ReportDispatcher.WriteSystem`.
+
+### `ProfilerSettingsSnapshot`
+
+Immutable point-in-time settings view that wraps a `ProfilerSettings` clone. Constructed via `ProfilerSettingsSnapshot.From(SettingsStore.Current)` (or read via `SettingsStore.Snapshot`). Runtime services (`Profiler`, `MetricsAggregator`, `MemoryHistory`, `ProfilerOverlay`) accept a `Func<ProfilerSettingsSnapshot>` accessor instead of reading `SettingsStore.Current` ad-hoc, so settings reads stay explicit and consistent across a frame. Adding a persisted setting only requires editing `ProfilerSettings`; the snapshot picks it up via `MemberwiseClone`.
+
+### `OverlayState`
+
+Mutable UI navigation state (`ModeIndex`, `Anchor`) lifted out of `ProfilerOverlay` so drawing, persistence, and navigation each have a single home. `ProfilerOverlay` owns the instance, holds it for the session, and routes hotkey/button events to `SetMode` / `SetAnchor` / `CycleMode` / `CycleAnchor`.
+
+### `ProfilerRecorderFactory` & `ProfilerRecorderSamples`
+
+`MemorySampler` exposes a wide set of Unity `ProfilerRecorder` markers. Two pieces keep that path honest and allocation-free:
+
+- `ProfilerRecorderFactory.StartByHandle(category, stat, capacity)` resolves a marker by walking `ProfilerRecorderHandle.GetAvailable()` so the lookup tolerates Unity's handle-based markers that have no typed `ProfilerCategory` constant. A missing marker returns `default`, surfaced in the snapshot as a counter-availability flag rather than a misleading zero.
+- `ProfilerRecorderSamples` owns a single reusable `List<ProfilerRecorderSample>` buffer and exposes `Average(recorder)` / `SumWithCount(recorder)`. `MemorySampler` holds one instance, so per-window recorder reads do not allocate.
+
+### `ReportTextSections`
+
+Shared text-section builders used by both the periodic `LogFileSink` writes and the one-shot `ReportExporter`. Centralises counter-availability formatting, top-table layout, and patched-vanilla-system summaries so the two output paths stay consistent.
 
 ## Harmony patches
 
@@ -138,16 +178,20 @@ The bottleneck logic uses **average phase ms per call** — derived from exact p
 
 The mod follows a **main-thread measurement** rule rather than scattering locks everywhere:
 
+- **Hot-path surface is `IProfilerHotPath`.** Implemented by `Profiler`. New hot-path methods belong on the interface so the contract stays explicit and the implementations cannot drift.
 - **`Profiler.RecordSystem`** is invoked from `SystemBase.Update` Postfix on the Unity main thread. It records into `MetricsAggregator` without locking.
 - **Measurement state is main-thread only:**
   - `OnFrame` is called from `UpdateSystem.Update(Rendering)` Postfix — main thread by Unity contract.
   - `OnSimTick` is called from `SimTickCounterSystem.OnUpdate` — ECS GameSimulation phase, main thread.
   - `RecordPhase` is called from the per-phase Postfix — main thread.
   - `RecordSystem` is called from `SystemBase.Update` Postfix — main thread.
-  - `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report`.
+  - `RecordPatchedVanilla` is called from `SystemBase.Update` Postfix when `SystemReplacementDetector.IsPatched(type)` returns true — main thread.
+  - `ReportScheduler`, `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report`.
   - `LastSnapshot` and `LastHealth` are written by `Report` and read by `ProfilerOverlay.OnGUI` — both main thread.
+  - `OverlayState` (mode index, anchor) is written and read by `ProfilerOverlay` only — main thread.
 - **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so a stale Harmony callback landing after `Mod.OnDispose` no-ops cleanly.
 - **Log output has its own lock.** `LogFileSink` serializes file IO because system messages can be routed from defensive off-thread diagnostics.
+- **`ReportDispatcher`** is invoked only from `Profiler.Report` and `Profiler.WriteSystem`, both main-thread; per-sink `try/catch` makes one bad sink isolated rather than fatal.
 - **`ProfilerHost.TryGet()`** does a single `Volatile.Read` of the instance reference. Callers must capture the result into a local variable before use; never write `ProfilerHost.IsAvailable` followed by `ProfilerHost.Current` — that's a TOCTOU bug.
 
 ## What this mod intentionally does NOT do
@@ -162,4 +206,4 @@ The mod follows a **main-thread measurement** rule rather than scattering locks 
 
 - [../USER_GUIDE.md](../USER_GUIDE.md) — Player-facing reference for the overlay
 - [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md) — How to add a metric or extend the overlay
-- [PLAN.md](../../VanillaProfiler/PLAN.md) — Original phase-by-phase plan
+- [../CHANGELOG.md](../CHANGELOG.md) — User-facing changes per release
