@@ -18,6 +18,8 @@ namespace VanillaProfiler
         public double ManagedGrowthMBperSec { get; internal set; }
         public int Spikes30fps { get; internal set; }
         public int Spikes20fps { get; internal set; }
+        // Top rows use self/exclusive main-thread cost. Tuple member stays TotalMs
+        // for API stability inside the overlay/export code.
         public IReadOnlyList<(string Name, double TotalMs)> TopVanillaSystems { get; internal set; }
             = Array.Empty<(string, double)>();
         public IReadOnlyList<(string Name, double TotalMs)> TopModSystems { get; internal set; }

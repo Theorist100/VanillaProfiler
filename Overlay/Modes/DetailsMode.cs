@@ -88,9 +88,9 @@ namespace VanillaProfiler.Overlay.Modes
                     $"City:          {OverlayFormat.Count(CityContext.Citizens)} pop, {OverlayFormat.Count(CityContext.Vehicles)} vehicles, {OverlayFormat.Count(CityContext.Buildings)} buildings",
                     ctx.Theme.DimStyle);
 
-            OverlayPanel.DrawTopTable(ctx, "Top mods (main-thread ms in sample)", snapshot.TopMods);
-            OverlayPanel.DrawTopTable(ctx, "Top vanilla systems (main-thread cost)", snapshot.TopVanillaSystems);
-            OverlayPanel.DrawTopTable(ctx, "Top mod systems (main-thread cost)", snapshot.TopModSystems);
+            OverlayPanel.DrawTopTable(ctx, "Top mods (self main-thread ms)", snapshot.TopMods);
+            OverlayPanel.DrawTopTable(ctx, "Top vanilla systems (self main-thread cost)", snapshot.TopVanillaSystems);
+            OverlayPanel.DrawTopTable(ctx, "Top mod systems (self main-thread cost)", snapshot.TopModSystems);
             DrawReplacements(ctx, snapshot.ReplacedVanillaSystems);
         }
 

@@ -6,7 +6,7 @@ Lightweight in-game frame-health and main-thread monitor. Tells you when the gam
 
 **Accurate:** frame time, FPS, GPU frame time, CPU main/render thread time, memory (managed/Mono/native/GPU), memory leak detection, frame spike count, frame spike screenshot, mod conflict detection.
 
-**Main-thread cost only** (per-system / per-mod tables): scheduling overhead, sync points, structural changes (`EntityManager`), ECB playback, and synchronous main-thread work. Useful for finding badly-architected mods and sync-point hotspots — flagged with `[likely sync point]` in the log when an Update() exceeds the threshold.
+**Self main-thread cost only** (per-system / per-mod top tables): scheduling overhead, sync points, structural changes (`EntityManager`), ECB playback, and synchronous main-thread work, with nested system Update calls subtracted from the parent. Useful for finding badly-architected mods and sync-point hotspots — flagged with `[likely sync point]` in the log when an Update() exceeds the threshold.
 
 **Not measured:** Burst-compiled job execution on worker threads. A clean DOTS system can cost 5–20 ms on workers and show ~0.01 ms here. For per-job analysis attach Unity Profiler to the running game — that's the only tool with engine-level instrumentation inside jobs.
 
@@ -62,7 +62,7 @@ TrafficLightsEnhancer
 Actionable recommendations picked from the current health report and graphics settings.
 
 ### Details
-Advanced screen for mod authors and support. Shows top mods (by main-thread cost), top vanilla systems (main-thread cost), top mod systems (main-thread cost), FPS sparkline, and city context. Per-thread CPU/GPU/PresentWait breakdown lives on the Engine screen instead. Per-system numbers reflect main-thread time only — see the "What this mod can and cannot measure" section at the top.
+Advanced screen for mod authors and support. Shows top mods (by self main-thread cost), top vanilla systems (self main-thread cost), top mod systems (self main-thread cost), FPS sparkline, and city context. Per-thread CPU/GPU/PresentWait breakdown lives on the Engine screen instead. Per-system numbers reflect self main-thread time only — see the "What this mod can and cannot measure" section at the top.
 
 A **Patched vanilla systems** section appears when another mod has applied a Harmony prefix to a vanilla `OnUpdate`. The line shows `Game.Foo.BarSystem  N.N ms  ← ModName` — the ms is the total `SystemBase.Update` elapsed time during the report window, measured unconditionally (independent of `Profile vanilla systems`). The elapsed time blends the patching mod's prefix with the vanilla original because Harmony does not expose a hook between them, so the split between mod and vanilla is unknown — but the total cost is honest and surfaced. Up to 6 entries on screen; the full list of patches is always written to `VanillaProfiler.log` as the `PATCHED VANILLA SYSTEMS` section once per save.
 

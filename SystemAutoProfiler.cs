@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using Unity.Entities;
 using VanillaProfiler.Diagnostics;
@@ -28,19 +29,30 @@ namespace VanillaProfiler
             public string ModName = string.Empty;
         }
 
-        // Per-call state carried via Harmony __state. Must survive nested SystemBase.Update
-        // invocations — vanilla CS2 nests these calls (ReplacePrefabSystem.FinalizeReplaces,
-        // HeatmapPreviewSystem.OnUpdate, PhotoModeRenderSystem all run other systems' Update
-        // synchronously inside their own OnUpdate). Each (Prefix, Postfix) pair gets its
-        // own __state instance, so nesting is intrinsically safe.
+        // Per-call state carried via Harmony __state. CS2 can synchronously call
+        // another SystemBase.Update from inside a system's OnUpdate, so we keep a
+        // thread-local stack and subtract child Update time from the parent. Reports
+        // use self/exclusive cost for top-system attribution while preserving the
+        // inclusive elapsed time for patched-vanilla diagnostics.
 #pragma warning disable CA1815
+        [StructLayout(LayoutKind.Auto)]
         public struct UpdateState
         {
             public long StartTicks;
+            public int Depth;
+            public bool Completed;
         }
 #pragma warning restore CA1815
 
+        private struct CallFrame
+        {
+            public long ChildTicks;
+        }
+
         private static readonly Dictionary<Type, SystemInfo> s_Cache = new();
+
+        [ThreadStatic]
+        private static List<CallFrame>? s_CallStack;
 
         /// <summary>Clears caches. Call from Mod.OnDispose so reloads get fresh attribution.</summary>
         public static void Reset()
@@ -64,29 +76,40 @@ namespace VanillaProfiler
         [HarmonyPrefix]
         public static void Prefix(out UpdateState __state)
         {
-            __state.StartTicks = Stopwatch.GetTimestamp();
+            var stack = s_CallStack ??= new List<CallFrame>(32);
+            __state = new UpdateState
+            {
+                StartTicks = Stopwatch.GetTimestamp(),
+                Depth = stack.Count,
+                Completed = false,
+            };
+            stack.Add(default);
         }
 
         [HarmonyPostfix]
-        public static void Postfix(SystemBase __instance, UpdateState __state)
+        public static void Postfix(SystemBase __instance, ref UpdateState __state)
         {
-            Complete(__instance, __state);
+            Complete(__instance, ref __state);
         }
 
         [HarmonyFinalizer]
-        public static Exception? Finalizer(SystemBase __instance, UpdateState __state, Exception? __exception)
+        public static Exception? Finalizer(SystemBase __instance, ref UpdateState __state, Exception? __exception)
         {
             if (__exception != null)
-                Complete(__instance, __state);
+                Complete(__instance, ref __state);
             return __exception;
         }
 
-        private static void Complete(SystemBase __instance, UpdateState __state)
+        private static void Complete(SystemBase __instance, ref UpdateState __state)
         {
             try
             {
+                if (__state.Completed) return;
+                __state.Completed = true;
                 MainThreadGuard.AssertMainThread(nameof(Postfix));
                 long elapsed = Stopwatch.GetTimestamp() - __state.StartTicks;
+                long childTicks = PopFrameAndGetChildTicks(__state.Depth, elapsed);
+                long selfTicks = elapsed > childTicks ? elapsed - childTicks : 0;
                 var type = __instance.GetType();
 
                 if (!s_Cache.TryGetValue(type, out var info))
@@ -112,15 +135,38 @@ namespace VanillaProfiler
                 {
                     if (SystemReplacementDetector.IsPatched(type))
                     {
-                        profiler.RecordPatchedVanilla(info.Name, elapsed);
+                        profiler.RecordPatchedVanilla(info.Name, selfTicks, elapsed);
                         return;
                     }
                     if (!profiler.ShouldProfileVanillaSystems) return;
                 }
 
-                profiler.RecordSystem(info.Name, elapsed, info.IsVanilla, info.ModName);
+                profiler.RecordSystem(info.Name, selfTicks, elapsed, info.IsVanilla, info.ModName);
             }
             catch { /* profiler — never crash game */ }
+        }
+
+        private static long PopFrameAndGetChildTicks(int depth, long elapsedTicks)
+        {
+            var stack = s_CallStack;
+            if (stack == null || depth < 0 || depth >= stack.Count)
+            {
+                stack?.Clear();
+                return 0;
+            }
+
+            long childTicks = stack[depth].ChildTicks;
+            stack.RemoveRange(depth, stack.Count - depth);
+
+            if (depth > 0)
+            {
+                int parentIndex = depth - 1;
+                var parent = stack[parentIndex];
+                parent.ChildTicks += elapsedTicks;
+                stack[parentIndex] = parent;
+            }
+
+            return childTicks;
         }
 
         private static SystemInfo BuildInfo(Type type)

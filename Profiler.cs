@@ -131,11 +131,11 @@ namespace VanillaProfiler
         }
 
         /// <summary>Main thread (SystemBase.Update Harmony Postfix).</summary>
-        public void RecordSystem(string name, long ticks, bool isVanilla, string? modName = null)
+        public void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName = null)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordSystem));
             if (m_Disposed) return;
-            m_Metrics.RecordSystem(name, ticks, isVanilla, modName);
+            m_Metrics.RecordSystem(name, selfTicks, inclusiveTicks, isVanilla, modName);
         }
 
         /// <summary>
@@ -145,11 +145,11 @@ namespace VanillaProfiler
         /// prefix and (possibly skipped) vanilla original, which is honest
         /// total cost but not attributable to either side.
         /// </summary>
-        public void RecordPatchedVanilla(string name, long ticks)
+        public void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks)
         {
             MainThreadGuard.AssertMainThread(nameof(RecordPatchedVanilla));
             if (m_Disposed) return;
-            m_Metrics.RecordPatchedVanilla(name, ticks);
+            m_Metrics.RecordPatchedVanilla(name, selfTicks, inclusiveTicks);
         }
 
         /// <summary>Main thread (UpdateSystem phase Postfix).</summary>
@@ -278,7 +278,7 @@ namespace VanillaProfiler
                 var r = list[i];
                 double ms = 0.0;
                 if (patchedMs != null && patchedMs.TryGetValue(r.VanillaSystem, out var phase))
-                    ms = phase.TotalTicks * 1000.0 / Stopwatch.Frequency;
+                    ms = phase.InclusiveTicks * 1000.0 / Stopwatch.Frequency;
                 arr[i] = (r.VanillaSystem, r.OwnerMod, ms);
             }
             return arr;

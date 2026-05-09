@@ -111,7 +111,7 @@ There's no automated test harness. Validation flow:
 5. **Export (Ctrl+F11).** A toast should appear; the file should be in `Reports/`. Open it and verify all sections.
 6. **Open settings (Ctrl+F8).** Edit the report interval to 1, click Apply & Save. Subsequent reports in `VanillaProfiler.log` should be every second.
 7. **Trigger a spike.** Run a heavy save while Spike screenshots are enabled (Ctrl+F7). At least one screenshot should land in `Logs/spikes/` after a frame >100 ms.
-8. **Multi-mod scenario.** Load with 3+ mods active. The `Top mods (main-thread ms in sample)` block in Details mode should show real assembly names, not "Unknown".
+8. **Multi-mod scenario.** Load with 3+ mods active. The `Top mods (self main-thread ms)` block in Details mode should show real assembly names, not "Unknown".
 9. **Return to main menu.** `CityContext` counters should reset (no stale "80k pop" in Details after going back to menu).
 
 ## Known limitations

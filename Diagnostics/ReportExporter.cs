@@ -53,9 +53,11 @@ namespace VanillaProfiler.Diagnostics
             sb.AppendLine($"Unity:            {Application.unityVersion}");
             sb.AppendLine();
             sb.AppendLine("--- Scope of measurement ---");
-            sb.AppendLine("  Per-system numbers below reflect main-thread cost only — scheduling");
+            sb.AppendLine("  Top per-system numbers below use self/exclusive main-thread cost — scheduling");
             sb.AppendLine("  overhead, sync points (Dependency.Complete / CompleteDependencyBeforeRO),");
             sb.AppendLine("  structural changes, ECB playback, and any synchronous main-thread work.");
+            sb.AppendLine("  Nested SystemBase.Update calls are subtracted from the parent system.");
+            sb.AppendLine("  Inclusive/total Update time is still kept for patched-vanilla diagnostics.");
             sb.AppendLine("  Job execution on worker threads is NOT captured: Burst-compiled jobs run");
             sb.AppendLine("  outside SystemBase.Update() and cannot be instrumented from a mod.");
             sb.AppendLine("  For accurate per-job profiling attach Unity Profiler to the running game.");

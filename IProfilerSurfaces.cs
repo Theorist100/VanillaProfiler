@@ -12,8 +12,8 @@ namespace VanillaProfiler
 
         void OnSimTick();
         void OnFrame();
-        void RecordSystem(string name, long ticks, bool isVanilla, string? modName = null);
-        void RecordPatchedVanilla(string name, long ticks);
+        void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName = null);
+        void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks);
         void RecordPhase(string name, long ticks);
     }
 

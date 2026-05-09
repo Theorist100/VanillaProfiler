@@ -15,7 +15,7 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 
 ## For mod authors and power users
 
-- Details overlay — per-system main-thread cost (vanilla vs each mod), FPS sparkline, top mods/systems
+- Details overlay — per-system self main-thread cost (vanilla vs each mod), FPS sparkline, top mods/systems
 - Engine overlay — raw Unity engine counters with PresentWait for honest GPU-bound detection (so the "98 % GPU" trap doesn't fool the bottleneck verdict). Counters that the build does not expose render as `n/a` instead of a misleading zero.
 - Sync-point flagging — Update() calls above SyncPointThresholdMs (default 0.5 ms) tagged `[likely sync point]` in the log; per-system suspect-call counter
 - ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
@@ -25,7 +25,7 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 
 ## Scope of measurement
 
-Per-system numbers reflect **main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes (`EntityManager.*`), `EntityCommandBuffer.Playback`, and any synchronous main-thread work. Job execution on worker threads is **not** captured: Burst-compiled jobs run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod. A well-architected DOTS system that schedules cleanly to workers will show ~0.01 ms here while its jobs may cost 5–20 ms on workers — those appear on Unity Profiler's worker timeline.
+Top per-system numbers reflect **self main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes (`EntityManager.*`), `EntityCommandBuffer.Playback`, and any synchronous main-thread work, with nested `SystemBase.Update` calls subtracted from the parent. Inclusive/total Update time is still kept for patched-vanilla diagnostics. Job execution on worker threads is **not** captured: Burst-compiled jobs run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod. A well-architected DOTS system that schedules cleanly to workers will show ~0.01 ms here while its jobs may cost 5–20 ms on workers — those appear on Unity Profiler's worker timeline.
 
 Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecorder), all memory metrics, frame spike detection and sync-point flagging are accurate. For per-job analysis attach **Unity Profiler** to the running game.
 

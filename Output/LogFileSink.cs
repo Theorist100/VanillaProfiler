@@ -101,9 +101,9 @@ namespace VanillaProfiler.Output
                 }
 
                 WritePhaseTable(metrics.Phases);
-                WriteSystemTable("TOP MODS (by main-thread time)", metrics.ModAggregate, 10);
-                WriteSystemTable("VANILLA SYSTEMS — main-thread cost (top 15)", metrics.VanillaSystems, 15);
-                WriteSystemTable("MOD SYSTEMS — main-thread cost (top 15)", metrics.ModSystems, 15);
+                WriteSystemTable("TOP MODS (self main-thread cost)", metrics.ModAggregate, 10);
+                WriteSystemTable("VANILLA SYSTEMS — self main-thread cost (top 15)", metrics.VanillaSystems, 15);
+                WriteSystemTable("MOD SYSTEMS — self main-thread cost (top 15)", metrics.ModSystems, 15);
                 // Patched vanilla systems are tracked in their own bucket
                 // because their elapsed time blends the patching mod's prefix
                 // with the vanilla original. Surfacing the table per cycle
@@ -111,7 +111,7 @@ namespace VanillaProfiler.Output
                 // shows — without it the only patched-vanilla ms data lives
                 // off-disk in the snapshot.
                 WriteSystemTable("PATCHED VANILLA SYSTEMS — total Update ms (mod+vanilla split unknown)",
-                    metrics.PatchedVanillaSystems, 15);
+                    metrics.PatchedVanillaSystems, 15, useInclusiveAsPrimary: true);
                 WriteMemorySection(memory);
                 WriteHealthSummary(health);
             }
@@ -168,30 +168,40 @@ namespace VanillaProfiler.Output
             }
         }
 
-        private void WriteSystemTable(string header, IReadOnlyDictionary<string, PhaseData> systems, int maxRows)
+        private void WriteSystemTable(
+            string header,
+            IReadOnlyDictionary<string, PhaseData> systems,
+            int maxRows,
+            bool useInclusiveAsPrimary = false)
         {
             if (systems.Count == 0) return;
             m_SortBuffer.Clear();
             foreach (var kvp in systems) m_SortBuffer.Add(kvp);
-            m_SortBuffer.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
+            if (useInclusiveAsPrimary)
+                m_SortBuffer.Sort(static (a, b) => b.Value.InclusiveTicks.CompareTo(a.Value.InclusiveTicks));
+            else
+                m_SortBuffer.Sort(static (a, b) => b.Value.SelfTicks.CompareTo(a.Value.SelfTicks));
             WriteLine("");
             WriteLine(header);
             // SYNC? column = number of individual Update() calls > SyncPointThresholdMs.
             // A non-zero value means the system did real main-thread work (sync point,
             // structural change, ECB playback, synchronous foreach), not just scheduling.
-            WriteLine($"{"SYSTEM",-45} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
-            WriteLine(new string('─', 89));
+            string primaryHeader = useInclusiveAsPrimary ? "TOTAL" : "SELF";
+            WriteLine($"{"SYSTEM",-45} {"CALLS",6} {primaryHeader,10} {"INCL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
+            WriteLine(new string('─', 101));
             int shown = 0;
             for (int i = 0; i < m_SortBuffer.Count && shown < maxRows; i++)
             {
                 var kvp = m_SortBuffer[i];
                 var d = kvp.Value;
-                double totalMs = d.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
-                if (totalMs < 0.5) continue;
-                double avgMs = d.CallCount > 0 ? totalMs / d.CallCount : 0;
+                long primaryTicks = useInclusiveAsPrimary ? d.InclusiveTicks : d.SelfTicks;
+                double primaryMs = primaryTicks * MS_PER_SEC / Stopwatch.Frequency;
+                if (primaryMs < 0.5) continue;
+                double inclusiveMs = d.InclusiveTicks * MS_PER_SEC / Stopwatch.Frequency;
+                double avgMs = d.CallCount > 0 ? primaryMs / d.CallCount : 0;
                 double maxMs = d.MaxTicks * MS_PER_SEC / Stopwatch.Frequency;
                 string flag = d.SyncPointSuspectCount > 0 ? "  [likely sync point]" : "";
-                WriteLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}{flag}"));
+                WriteLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {primaryMs,9:F1}ms {inclusiveMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}{flag}"));
                 shown++;
             }
         }
@@ -376,9 +386,11 @@ namespace VanillaProfiler.Output
             writer.WriteLine(Inv($"Report interval: {SettingsStore.Snapshot.Settings.ReportIntervalSec}s"));
             writer.WriteLine();
             writer.WriteLine("NOTE on per-system numbers below:");
-            writer.WriteLine("  These reflect main-thread cost only — scheduling overhead, sync points,");
+            writer.WriteLine("  SELF columns reflect exclusive main-thread cost — scheduling overhead, sync points,");
             writer.WriteLine("  structural changes, ECB playback, and any work done synchronously on the");
-            writer.WriteLine("  main thread. Job execution on worker threads is NOT captured here, because");
+            writer.WriteLine("  main thread, with nested SystemBase.Update calls subtracted. INCL keeps");
+            writer.WriteLine("  total elapsed Update time when that context is useful.");
+            writer.WriteLine("  Job execution on worker threads is NOT captured here, because");
             writer.WriteLine("  Burst-compiled jobs run outside of SystemBase.Update(). For accurate");
             writer.WriteLine("  per-job profiling attach Unity Profiler to the running game.");
             writer.WriteLine();

@@ -64,12 +64,12 @@ namespace VanillaProfiler.Aggregation
             Add(m_Phases, name, ticks, m_SyncPointTickThreshold);
         }
 
-        public void RecordSystem(string name, long ticks, bool isVanilla, string? modName)
+        public void RecordSystem(string name, long selfTicks, long inclusiveTicks, bool isVanilla, string? modName)
         {
             var dict = isVanilla ? m_VanillaSystems : m_ModSystems;
-            Add(dict, name, ticks, m_SyncPointTickThreshold);
+            Add(dict, name, selfTicks, inclusiveTicks, m_SyncPointTickThreshold);
             if (!isVanilla && !string.IsNullOrEmpty(modName))
-                Add(m_ModAggregate, modName!, ticks, m_SyncPointTickThreshold);
+                Add(m_ModAggregate, modName!, selfTicks, inclusiveTicks, m_SyncPointTickThreshold);
         }
 
         /// <summary>
@@ -79,9 +79,9 @@ namespace VanillaProfiler.Aggregation
         /// section can show total ms regardless of <c>ProfileVanillaSystems</c>,
         /// without double-counting against <c>VanillaSystems</c>.
         /// </summary>
-        public void RecordPatchedVanilla(string name, long ticks)
+        public void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks)
         {
-            Add(m_PatchedVanillaSystems, name, ticks, m_SyncPointTickThreshold);
+            Add(m_PatchedVanillaSystems, name, selfTicks, inclusiveTicks, m_SyncPointTickThreshold);
         }
 
         /// <summary>Swaps out accumulated state; dispose the lease to return buffers.</summary>
@@ -157,16 +157,25 @@ namespace VanillaProfiler.Aggregation
         }
 
         private static void Add(Dictionary<string, PhaseData> dict, string key, long ticks, long syncPointTickThreshold)
+            => Add(dict, key, ticks, ticks, syncPointTickThreshold);
+
+        private static void Add(
+            Dictionary<string, PhaseData> dict,
+            string key,
+            long selfTicks,
+            long inclusiveTicks,
+            long syncPointTickThreshold)
         {
             if (!dict.TryGetValue(key, out var data))
             {
                 data = new PhaseData();
                 dict[key] = data;
             }
-            data.TotalTicks += ticks;
+            data.SelfTicks += selfTicks;
+            data.InclusiveTicks += inclusiveTicks;
             data.CallCount++;
-            if (ticks > data.MaxTicks) data.MaxTicks = ticks;
-            if (ticks >= syncPointTickThreshold) data.SyncPointSuspectCount++;
+            if (inclusiveTicks > data.MaxTicks) data.MaxTicks = inclusiveTicks;
+            if (inclusiveTicks >= syncPointTickThreshold) data.SyncPointSuspectCount++;
         }
 
         private static long ComputeSyncPointTicks(float thresholdMs)

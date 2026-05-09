@@ -31,9 +31,9 @@ namespace VanillaProfiler.Diagnostics
         public static void AppendTopTables(StringBuilder sb, OverlaySnapshot? snap, string windowLabel)
         {
             if (snap == null) return;
-            AppendTopTable(sb, $"--- Top Mods (by main-thread time, {windowLabel}) ---", snap.TopMods);
-            AppendTopTable(sb, "--- Top Mod Systems (main-thread cost) ---", snap.TopModSystems);
-            AppendTopTable(sb, "--- Top Vanilla Systems (main-thread cost) ---", snap.TopVanillaSystems);
+            AppendTopTable(sb, $"--- Top Mods (self main-thread cost, {windowLabel}) ---", snap.TopMods);
+            AppendTopTable(sb, "--- Top Mod Systems (self main-thread cost) ---", snap.TopModSystems);
+            AppendTopTable(sb, "--- Top Vanilla Systems (self main-thread cost) ---", snap.TopVanillaSystems);
             AppendReplacements(sb, snap.ReplacedVanillaSystems);
         }
 

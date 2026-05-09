@@ -4,11 +4,11 @@
 
 - **Zero gameplay impact.** No entities created, no game state mutated. All measurement happens through Harmony patches and read-only ECS queries.
 - **Low overhead.** ~300 Stopwatch start/stop pairs per sim tick + four small queries every 5 seconds. Negligible compared to the systems being measured.
-- **Two audiences.** Status / Diagnosis modes for normal players (traffic-light health, leak detection, support-file export). Details mode + `VanillaProfiler.log` for mod authors and power users (per-system main-thread cost, sync-point flagging, ECB.Playback timing, memory deltas).
+- **Two audiences.** Status / Diagnosis modes for normal players (traffic-light health, leak detection, support-file export). Details mode + `VanillaProfiler.log` for mod authors and power users (per-system self main-thread cost, sync-point flagging, ECB.Playback timing, memory deltas).
 
 ## Scope of measurement
 
-Per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) capture **main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes, `EntityCommandBuffer.Playback`, and any synchronous main-thread work. Burst-compiled jobs scheduled to worker threads run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod in a release build. Frame time, GPU/CPU thread time (Unity ProfilerRecorder), all memory metrics and the sync-point threshold flag are accurate. For per-job analysis attach Unity Profiler.
+Top per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update`) capture **self/exclusive main-thread cost only** — scheduling overhead, sync points (`Dependency.Complete`, `CompleteDependencyBeforeRO`), structural changes, `EntityCommandBuffer.Playback`, and any synchronous main-thread work, with nested `SystemBase.Update` calls subtracted from the parent system. Inclusive elapsed Update time is retained in `PhaseData.InclusiveTicks` for diagnostics such as patched-vanilla rows. Burst-compiled jobs scheduled to worker threads run as native code outside `SystemBase.Update()` and cannot be instrumented from a mod in a release build. Frame time, GPU/CPU thread time (Unity ProfilerRecorder), all memory metrics and the sync-point threshold flag are accurate. For per-job analysis attach Unity Profiler.
 
 ## Module layout
 
@@ -27,7 +27,7 @@ VanillaProfiler (assembly)
 ├── ProfilerHost.cs             Static handle — Volatile.Read returning IProfilerPatchSurface or IProfilerReadSurface; the concrete Profiler type is not exposed.
 ├── ProfilerOverlay.cs          IMGUI presentation layer. No measurement logic. Holds OverlayState for navigation.
 ├── ReportScheduler.cs          Owns frame-to-frame timing and report cadence; answers "is a report due now?".
-├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (main-thread cost).
+├── SystemAutoProfiler.cs       Harmony patch — measures every SystemBase.Update() call (self + inclusive main-thread cost).
 ├── UpdateSystemPatch.cs        Harmony patch — measures phase boundaries (Pre/Post/Render).
 ├── EntityCommandBufferPatch.cs Harmony patch — times EntityCommandBuffer.Playback, including thrown playbacks via finalizer.
 ├── SimTickCounterSystem.cs     Counts simulation ticks (1 call per game tick).
@@ -107,10 +107,11 @@ Called from the **Rendering** phase Harmony patch (`UpdateSystemPatch`). One cal
 
 Runs after every `SystemBase.Update`. Does:
 
+- Pop the thread-local measurement stack and compute `selfTicks = inclusiveTicks - childSystemUpdateTicks`
 - Resolve `Type` → `(name, isVanilla, modName)` once via `ModAttribution.Resolve` (cached)
 - For vanilla types, query `SystemReplacementDetector.IsPatched(Type)` (O(1) hash lookup, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime)
 - Route the elapsed delta:
-  - **patched vanilla** → `Profiler.RecordPatchedVanilla` (independent of `ProfileVanillaSystems`; the elapsed time blends mod prefix + vanilla original)
+  - **patched vanilla** → `Profiler.RecordPatchedVanilla` (independent of `ProfileVanillaSystems`; reports total/inclusive Update ms because the elapsed time blends mod prefix + vanilla original)
   - **plain vanilla** → `Profiler.RecordSystem` if `ProfileVanillaSystems = true`, else dropped
   - **mod system** → `Profiler.RecordSystem`
 
@@ -179,7 +180,7 @@ Shared text-section builders used by both the periodic `LogFileSink` writes and 
 
 | Patch | Target | Purpose |
 |---|---|---|
-| `SystemAutoProfiler` | `SystemBase.Update` | Per-system main-thread cost for every system in every world |
+| `SystemAutoProfiler` | `SystemBase.Update` | Per-system self and inclusive main-thread cost for every system in every world |
 | `UpdateSystemPatch.UpdatePhase` | `UpdateSystem.Update(SystemUpdatePhase)` | Phase timing + render frame trigger |
 | `UpdateSystemPatch.UpdatePhaseWithIndex` | `UpdateSystem.Update(SystemUpdatePhase, uint, int)` | GameSimulation tick phase timing |
 | `EntityCommandBufferPatch.PlaybackEntityManager` | `EntityCommandBuffer.Playback(EntityManager)` | ECB playback time, surfaced as `ECB.Playback` phase |
