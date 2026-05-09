@@ -37,7 +37,6 @@ namespace VanillaProfiler.Overlay
         // Last label matches HiddenMode.DisplayName ("Hide") so the segmented row
         // shows the same word as the bottom-row mode tabs. "Hidden" used to clip
         // at this column width (~48 px per slot on a 6-mode strip).
-        private static readonly string[] s_ModeLabels = { "Status", "Diag", "Tips", "Details", "Engine", "Hide" };
         private static readonly string[] s_AnchorLabels = { "Top-L", "Top-R", "Bot-R", "Bot-L" };
         private static readonly string[] s_ScaleLabels = { "Auto", "1x", "1.5x", "2x", "2.5x" };
         private static readonly float[] s_ScaleValues = { 0f, 1f, 1.5f, 2f, 2.5f };
@@ -237,8 +236,8 @@ namespace VanillaProfiler.Overlay
         private float DrawModeSettings(OverlayTheme theme, float lx, float ly, float fw)
         {
             ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Default mode",
-                m_Draft!.DefaultMode, s_ModeLabels,
-                v => { m_Draft.DefaultMode = v; m_Dirty.DefaultMode = true; });
+                OverlayModeCatalog.IndexFromPersisted(m_Draft!.DefaultMode), OverlayModeCatalog.SettingsLabels,
+                v => { m_Draft.DefaultMode = OverlayModeCatalog.PersistedFromIndex(v); m_Dirty.DefaultMode = true; });
             ly = SettingsWidgets.DrawSegmentedRow(theme, lx, ly, fw, "Position",
                 m_Draft.Anchor, s_AnchorLabels,
                 v => { m_Draft.Anchor = v; m_Dirty.Anchor = true; });
@@ -323,6 +322,9 @@ namespace VanillaProfiler.Overlay
             m_Draft = new SettingsDraft(new ProfilerSettings());
             m_Dirty.ReplaceAll();
             m_ErrorText = null;
+            m_PosDirty = false;
+            m_HasWindowRect = false;
+            m_WindowRect = default;
             SyncTextFieldsFromDraft();
         }
 

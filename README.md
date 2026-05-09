@@ -9,8 +9,8 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 - Tips screen — prioritized settings and troubleshooting recommendations
 - Engine screen — raw Unity counters: per-thread frame timing (Main / Render / GPU / PresentWait), DrawCalls / SetPass / Tris / Verts / shadow casters, GPU memory split (buffers vs render targets), GC stalls, process RSS
 - Memory leak detector — flags sustained managed-heap growth across the recent window
-- Bottleneck verdict (RenderBound / SimBound / MemoryBound / Balanced) with concrete next step
-- Auto-screenshots on frame spikes
+- Bottleneck verdict (GpuBound / CpuRenderBound / SimBound / MemoryBound / Balanced) with concrete next step
+- Optional spike screenshots on frame spikes (enable with Ctrl+F7 or Settings)
 - Ctrl+F11 export — one-click support report plus bounded support bundle (system info, mods, stats, settings, log tail) to send to mod authors
 
 ## For mod authors and power users
@@ -19,9 +19,9 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one drop-in install —
 - Engine overlay — raw Unity engine counters with PresentWait for honest GPU-bound detection (so the "98 % GPU" trap doesn't fool the bottleneck verdict). Counters that the build does not expose render as `n/a` instead of a misleading zero.
 - Sync-point flagging — Update() calls above SyncPointThresholdMs (default 0.5 ms) tagged `[likely sync point]` in the log; per-system suspect-call counter
 - ECB.Playback timing — `EntityCommandBuffer.Playback` Harmony hook surfaces structural-change cost separately from system Update time
-- Full PERF report every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas, render counts, GC stall sums
+- Full report section every 5 s in `VanillaProfiler.log` — phase tables, top vanilla and mod systems, ECB cost, memory deltas, render counts, GC stall sums
 - HarmonyConflictDetector — lists multi-owner Harmony patches that involve VanillaProfiler
-- SystemReplacementDetector — surfaces vanilla `OnUpdate` methods hooked by a foreign Harmony prefix and reports total `Update` ms per cycle. The elapsed time blends the patching mod's prefix with the vanilla original (Harmony does not let us split them), but the total is honest and shown unconditionally — independent of `Profile vanilla systems`.
+- SystemReplacementDetector — surfaces vanilla `OnUpdate` methods hooked by foreign Harmony prefixes, postfixes, transpilers, or finalizers and reports total `Update` ms per cycle. The elapsed time blends the patching mod's hook work with the vanilla original (Harmony does not let us split them), but the total is honest and shown unconditionally — independent of `Profile vanilla systems`.
 
 ## Scope of measurement
 
@@ -46,7 +46,7 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 ├── IProfilerSurfaces.cs                Two interfaces: IProfilerPatchSurface (Harmony/ECS hot path) and IProfilerReadSurface (overlay/export/lifecycle/log)
 ├── ProfilerHost.cs                     Static handle — exposes the live profiler only as IProfilerPatchSurface or IProfilerReadSurface (Volatile.Read)
 ├── ProfilerLifecycleState.cs           Lifecycle enum: NoCity / LoadingCity / Settling / Active
-├── ProfilerOverlay.cs                  MonoBehaviour shell — picks an IOverlayMode, draws panel
+├── ProfilerOverlay.cs                  MonoBehaviour shell — dispatches overlay commands, resolves mode descriptors, draws panel
 ├── ReportScheduler.cs                  Owns frame-to-frame timing and report cadence
 ├── SystemAutoProfiler.cs               Harmony patch on SystemBase.Update — covers ~300 systems
 ├── UpdateSystemPatch.cs                Phase timing (Pre/PostSimulation, Rendering, etc.)
@@ -82,9 +82,11 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │   ├── OverlayTheme.cs                 Classic Gold palette + cached GUIStyles
 │   ├── OverlayPanel.cs                 DrawFrame / DrawSeparator / DrawSection / DrawLine
 │   ├── OverlayFormat.cs                Pure formatting helpers
-│   ├── OverlayInputHandler.cs          Ctrl+F-key polling → semantic events
-│   ├── OverlayBadges.cs                Hidden / Standby / Settling badges (small fixed pills)
-│   ├── OverlayState.cs                 UI navigation state (mode index, anchor) separated from drawing
+│   ├── OverlayInputHandler.cs          Ctrl+F-key polling → semantic commands
+│   ├── OverlayCommand.cs               Command enum used by hotkey policy and overlay dispatch
+│   ├── OverlayModeCatalog.cs           Stable mode-id registry; draw order is not the persisted contract
+│   ├── OverlayBadges.cs                Hidden / Settling badges (small fixed pills)
+│   ├── OverlayState.cs                 UI navigation state (stable mode id, draw index, anchor) separated from drawing
 │   ├── DrawContext.cs                  Cursor + theme bundle passed to mode renderers
 │   ├── Toast.cs                        Bottom-of-screen status messages
 │   ├── Anchor.cs                       Screen-corner enum + Cycle/ShortName extensions
@@ -104,13 +106,13 @@ Frame time, GPU frame time, CPU main/render thread time (via Unity ProfilerRecor
 │       ├── DetailsMode.cs              Mod-author view: top mods, sparkline, system tables
 │       └── EngineMode.cs               Raw Unity engine counters (frame / render / GPU mem / GC)
 └── Diagnostics/
-    ├── ModAttribution.cs               Type → ModName via IMod scan + assembly fallback
+    ├── ModAttribution.cs               Type/assembly attribution with origin, confidence, and Harmony owner evidence
     ├── HealthClassifier.cs             GOOD/OK/POOR per metric + bottleneck verdict
     ├── MemoryHistory.cs                Rolling 60 s window, median delta leak detector
     ├── FpsSparkline.cs                 Unicode block chart of last 60 s of FPS
     ├── SpikeScreenshot.cs              Frame > threshold → ScreenCapture, throttled (instance, owned by Profiler)
     ├── HarmonyConflictDetector.cs      Lists multi-owner patches involving VanillaProfiler
-    ├── SystemReplacementDetector.cs    Lists vanilla OnUpdate methods prefixed by other mods
+    ├── SystemReplacementDetector.cs    Lists vanilla OnUpdate methods patched by other mods
     ├── GraphicsSettingsProbe.cs        Reads CS2 graphics settings (LOD, volumetrics, etc.) — instance, owned by Profiler
     ├── Recommendation.cs               DTO for a single recommendation (level + title + reason + action)
     ├── RecommendationEngine.cs         Builds recommendations from health + snapshot + probed settings — instance, takes GraphicsSettingsProbe via DI
@@ -144,6 +146,20 @@ dotnet build VanillaProfiler.csproj --no-incremental
 ```
 
 Output is auto-deployed to `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Mods\VanillaProfiler\`.
+
+## Release preflight
+
+Public release artifacts must come from a clean Release build in this repository,
+not from the live CS2 auto-deploy folder.
+
+```powershell
+.\scripts\release-preflight.ps1
+```
+
+The preflight compares `VanillaProfiler.csproj` `<Version>` with
+`Properties/PublishConfiguration.xml` `ModVersion`, checks the built DLL version
+metadata, stages expected files under `artifacts/release/VanillaProfiler-<version>`,
+and fails on debug/local artifacts.
 
 ## License
 

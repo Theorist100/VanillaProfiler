@@ -24,10 +24,10 @@ namespace VanillaProfiler.Overlay
         }
 
         private readonly OverlayTheme m_Theme;
-        private readonly IOverlayMode[] m_Modes;
+        private readonly OverlayModeDescriptor[] m_Modes;
         private readonly Actions m_Actions;
 
-        public MainPanelButtons(OverlayTheme theme, IOverlayMode[] modes, Actions actions)
+        public MainPanelButtons(OverlayTheme theme, OverlayModeDescriptor[] modes, Actions actions)
         {
             m_Theme = theme;
             m_Modes = modes;

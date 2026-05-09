@@ -4,8 +4,8 @@ namespace VanillaProfiler.Overlay
 {
     /// <summary>
     /// Small fixed-position pills used when the full overlay is not appropriate:
-    /// HiddenMode (player toggled overlay off) and Standby (no save loaded yet).
-    /// Both anchor to the top-right so the player learns one place to look.
+    /// HiddenMode (player toggled overlay off) and settling (save is loaded but
+    /// the first fresh report is not ready yet).
     /// </summary>
     public static class OverlayBadges
     {
@@ -13,25 +13,6 @@ namespace VanillaProfiler.Overlay
         public static void DrawHidden(OverlayTheme theme, float scale)
         {
             DrawBadge(theme, scale, "[Ctrl+F9] Profiler", theme.BodyStyle);
-        }
-
-        /// <summary>
-        /// Neutral no-city state badge — main menu, editor, or pre-game screens.
-        ///
-        /// INTENTIONALLY UNCALLED. Paradox Mods loads every mod assembly during
-        /// GameManager.Initialize, well before the player picks a save, so OnGUI runs
-        /// throughout splash + main menu. Rendering anything during NoCity puts a profiler
-        /// pill in front of every player on every launch — intrusive for the common case
-        /// where the user only wants to play, not measure. The method stays defined so a
-        /// future opt-in setting ("show standby badge in main menu") can wire it without a
-        /// rewrite. Do NOT wire this from ProfilerOverlay.DrawScaled unconditionally —
-        /// audit waves will keep flagging it as dead, but that's the correct state.
-        /// </summary>
-        public static void DrawStandby(OverlayTheme theme, float scale)
-        {
-            DrawBadge(theme, scale,
-                "Profiler waiting for game  |  Ctrl+F8 settings",
-                theme.DimStyle);
         }
 
         /// <summary>

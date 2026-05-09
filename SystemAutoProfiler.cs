@@ -10,8 +10,8 @@ namespace VanillaProfiler
 {
     /// <summary>
     /// Patches SystemBase.Update() to profile ALL systems individually.
-    /// Separates vanilla (Game.*, Unity.*, Colossal.*) from mod systems and
-    /// attributes each system to its owning mod via ModAttribution.
+    /// Separates trusted runtime systems from mod systems and attributes each
+    /// system to its owning mod via ModAttribution.
     ///
     /// SystemBase.Update is invoked sequentially from ComponentSystemGroup.UpdateAllSystems on
     /// the main thread. Harmony Postfix runs on the same thread, so plain dictionaries are enough.
@@ -36,10 +36,11 @@ namespace VanillaProfiler
         // inclusive elapsed time for patched-vanilla diagnostics.
 #pragma warning disable CA1815
         [StructLayout(LayoutKind.Auto)]
-        public struct UpdateState
+        public struct SystemUpdateMeasurement
         {
             public long StartTicks;
             public int Depth;
+            public bool Started;
             public bool Completed;
         }
 #pragma warning restore CA1815
@@ -74,41 +75,37 @@ namespace VanillaProfiler
         }
 
         [HarmonyPrefix]
-        public static void Prefix(out UpdateState __state)
+        public static void Prefix(out SystemUpdateMeasurement __state)
         {
             var stack = s_CallStack ??= new List<CallFrame>(32);
-            __state = new UpdateState
-            {
-                StartTicks = Stopwatch.GetTimestamp(),
-                Depth = stack.Count,
-                Completed = false,
-            };
+            __state = Begin(stack.Count);
             stack.Add(default);
         }
 
         [HarmonyPostfix]
-        public static void Postfix(SystemBase __instance, ref UpdateState __state)
+        public static void Postfix(SystemBase __instance, ref SystemUpdateMeasurement __state)
         {
             Complete(__instance, ref __state);
         }
 
         [HarmonyFinalizer]
-        public static Exception? Finalizer(SystemBase __instance, ref UpdateState __state, Exception? __exception)
+        public static Exception? Finalizer(SystemBase __instance, ref SystemUpdateMeasurement __state, Exception? __exception)
         {
-            if (__exception != null)
-                Complete(__instance, ref __state);
+            if (!__state.Started) return __exception;
+            Complete(__instance, ref __state);
             return __exception;
         }
 
-        private static void Complete(SystemBase __instance, ref UpdateState __state)
+        private static void Complete(SystemBase __instance, ref SystemUpdateMeasurement __state)
         {
             try
             {
-                if (__state.Completed) return;
+                if (!__state.Started || __state.Completed) return;
                 __state.Completed = true;
-                MainThreadGuard.AssertMainThread(nameof(Postfix));
                 long elapsed = Stopwatch.GetTimestamp() - __state.StartTicks;
-                long childTicks = PopFrameAndGetChildTicks(__state.Depth, elapsed);
+                if (!TryPopFrameAndGetChildTicks(__state.Depth, elapsed, out long childTicks))
+                    return;
+                MainThreadGuard.AssertMainThread(nameof(Postfix));
                 long selfTicks = elapsed > childTicks ? elapsed - childTicks : 0;
                 var type = __instance.GetType();
 
@@ -120,15 +117,15 @@ namespace VanillaProfiler
 
                 // Patched vanilla systems are routed to a dedicated bucket
                 // independent of ProfileVanillaSystems. Their elapsed time
-                // blends the patching mod's prefix with the (possibly skipped)
+                // blends the patching mod's hooks with the (possibly skipped)
                 // vanilla original — Harmony does not expose a hook between
                 // them — but the total ms is honest, and surfacing it is the
                 // whole point of the Patched vanilla systems section. We
                 // Re-check the membership every call (instead of caching on
-                // SystemInfo) against the snapshot published by Profiler.
+                // SystemInfo) against the active report-window context.
                 // Mod-options screens can flip Harmony patches at runtime;
-                // Profiler refreshes the snapshot at lifecycle boundaries and
-                // at the start of each report cycle.
+                // Profiler rotates immutable report-window contexts at
+                // lifecycle boundaries and after each report cycle.
                 var profiler = ProfilerHost.TryGetPatchSurface();
                 if (profiler == null) return;
 
@@ -147,16 +144,28 @@ namespace VanillaProfiler
             catch { /* profiler — never crash game */ }
         }
 
-        private static long PopFrameAndGetChildTicks(int depth, long elapsedTicks)
+        private static SystemUpdateMeasurement Begin(int depth)
         {
+            return new SystemUpdateMeasurement
+            {
+                StartTicks = Stopwatch.GetTimestamp(),
+                Depth = depth,
+                Started = true,
+                Completed = false,
+            };
+        }
+
+        private static bool TryPopFrameAndGetChildTicks(int depth, long elapsedTicks, out long childTicks)
+        {
+            childTicks = 0;
             var stack = s_CallStack;
             if (stack == null || depth < 0 || depth >= stack.Count)
             {
                 stack?.Clear();
-                return 0;
+                return false;
             }
 
-            long childTicks = stack[depth].ChildTicks;
+            childTicks = stack[depth].ChildTicks;
             stack.RemoveRange(depth, stack.Count - depth);
 
             if (depth > 0)
@@ -167,12 +176,12 @@ namespace VanillaProfiler
                 stack[parentIndex] = parent;
             }
 
-            return childTicks;
+            return true;
         }
 
         private static SystemInfo BuildInfo(Type type)
         {
-            string modName = ModAttribution.Resolve(type);
+            var identity = ModAttribution.ResolveIdentity(type);
             string name = string.IsNullOrEmpty(type.FullName)
                 ? (string.IsNullOrEmpty(type.Name) ? "<anonymous>" : type.Name)
                 : type.FullName;
@@ -183,8 +192,8 @@ namespace VanillaProfiler
             return new SystemInfo
             {
                 Name = name,
-                IsVanilla = string.Equals(modName, ModAttribution.VANILLA, StringComparison.Ordinal),
-                ModName = modName,
+                IsVanilla = identity.IsVanillaSystemOwner,
+                ModName = ModAttribution.FormatIdentity(identity),
             };
         }
     }

@@ -45,7 +45,16 @@ namespace VanillaProfiler
             if (now < m_NextRefresh) return;
             m_NextRefresh = now + REFRESH_INTERVAL;
 
-            if (!ProfilerHost.IsAvailable)
+            var profiler = ProfilerHost.TryGetReadSurface();
+            if (profiler == null)
+            {
+                CityContext.Reset();
+                return;
+            }
+
+            var state = profiler.LifecycleState;
+            if (state != ProfilerLifecycleState.Settling
+                && state != ProfilerLifecycleState.Active)
             {
                 CityContext.Reset();
                 return;

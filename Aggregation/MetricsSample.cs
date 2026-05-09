@@ -19,6 +19,7 @@ namespace VanillaProfiler.Aggregation
         public int SimTickCount;
         public int Spikes30;
         public int Spikes20;
+        public ReportWindowContext WindowContext = ReportWindowContext.Empty;
         public IReadOnlyDictionary<string, PhaseData> Phases = EmptyPhaseData;
         public IReadOnlyDictionary<string, PhaseData> VanillaSystems = EmptyPhaseData;
         public IReadOnlyDictionary<string, PhaseData> ModSystems = EmptyPhaseData;

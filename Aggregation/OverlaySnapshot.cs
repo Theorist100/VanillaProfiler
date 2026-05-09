@@ -1,8 +1,27 @@
 using System;
 using System.Collections.Generic;
+using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler
 {
+    public sealed class ReplacedVanillaSystemRow
+    {
+        public ReplacedVanillaSystemRow(
+            string vanillaSystem,
+            IReadOnlyList<PatchOwnerIdentity> owners,
+            double totalMs)
+        {
+            VanillaSystem = vanillaSystem ?? string.Empty;
+            Owners = owners ?? Array.Empty<PatchOwnerIdentity>();
+            TotalMs = totalMs;
+        }
+
+        public string VanillaSystem { get; }
+        public IReadOnlyList<PatchOwnerIdentity> Owners { get; }
+        public double TotalMs { get; }
+        public string OwnerText => SystemReplacementDetector.FormatOwners(Owners);
+    }
+
     /// <summary>
     /// Read-only view of the last reporting window. Built by ReportBuilder and
     /// then published to overlay/export consumers.
@@ -68,7 +87,7 @@ namespace VanillaProfiler
         public bool SystemUsedAvailable { get; internal set; }
         public bool AppResidentAvailable { get; internal set; }
 
-        public IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> ReplacedVanillaSystems { get; internal set; }
-            = Array.Empty<(string, string, double)>();
+        public IReadOnlyList<ReplacedVanillaSystemRow> ReplacedVanillaSystems { get; internal set; }
+            = Array.Empty<ReplacedVanillaSystemRow>();
     }
 }

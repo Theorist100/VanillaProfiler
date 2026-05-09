@@ -41,11 +41,10 @@ namespace VanillaProfiler.Overlay
         public GUIStyle TextFieldStyle { get; private set; } = null!;
         public GUIStyle ToggleStyle { get; private set; } = null!;
 
-        // Pre-built coloured variants — referenced by HealthLevel / BottleneckKind to avoid
+        // Pre-built coloured variants — referenced by HealthLevel to avoid
         // allocating a new GUIStyle every OnGUI frame would add avoidable managed growth
         // to the profiler itself.
         private GUIStyle[] m_HealthStyles = Array.Empty<GUIStyle>();        // indexed by (int)HealthLevel
-        private GUIStyle[] m_BottleneckStyles = Array.Empty<GUIStyle>();    // indexed by (int)BottleneckKind
 
         /// <summary>Must be called from OnGUI before any drawing — GUI.skin is null earlier.</summary>
         public void EnsureInitialized()
@@ -125,14 +124,6 @@ namespace VanillaProfiler.Overlay
                 BuildColored(WARNING),
                 BuildColored(ERROR_RED),
             };
-            m_BottleneckStyles = new[]
-            {
-                BodyStyle,
-                BodyStyle,
-                BuildColored(WARNING),
-                BuildColored(WARNING),
-                BuildColored(ERROR_RED),
-            };
         }
 
         private static GUIStyle LabelStyle(int fontSize, Color color, FontStyle fontStyle, TextAnchor alignment)
@@ -169,8 +160,16 @@ namespace VanillaProfiler.Overlay
         public GUIStyle StyleForBottleneck(BottleneckKind kind)
         {
             EnsureInitialized();
-            int i = (int)kind;
-            return (uint)i < (uint)m_BottleneckStyles.Length ? m_BottleneckStyles[i] : BodyStyle;
+            return kind switch
+            {
+                BottleneckKind.Unknown => BodyStyle,
+                BottleneckKind.Balanced => BodyStyle,
+                BottleneckKind.GpuBound => StyleForHealth(HealthLevel.Ok),
+                BottleneckKind.CpuRenderBound => StyleForHealth(HealthLevel.Ok),
+                BottleneckKind.SimBound => StyleForHealth(HealthLevel.Ok),
+                BottleneckKind.MemoryBound => StyleForHealth(HealthLevel.Poor),
+                _ => BodyStyle,
+            };
         }
 
         public void Release()
@@ -189,7 +188,6 @@ namespace VanillaProfiler.Overlay
             TextFieldStyle = null!;
             ToggleStyle = null!;
             m_HealthStyles = Array.Empty<GUIStyle>();
-            m_BottleneckStyles = Array.Empty<GUIStyle>();
             m_Initialized = false;
         }
 

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace VanillaProfiler.Overlay
@@ -60,15 +59,6 @@ namespace VanillaProfiler.Overlay
         public static void DrawCounterRow(DrawContext ctx, string label, long value, bool available, GUIStyle style)
         {
             DrawMetricRow(ctx, label, OverlayFormat.Counter(value, available), style);
-        }
-
-        public static void DrawTopTable(
-            DrawContext ctx, string title, IReadOnlyList<(string Name, double TotalMs)> rows)
-        {
-            if (rows == null || rows.Count == 0) return;
-            DrawSection(ctx, title);
-            foreach (var (name, ms) in rows)
-                DrawLine(ctx, $"  {OverlayFormat.Truncate(name, 36),-36}  {ms,7:F1} ms", ctx.Theme.BodyStyle);
         }
 
         public static void DrawHeader(DrawContext ctx, string title)

@@ -10,9 +10,12 @@ namespace VanillaProfiler.Overlay
     {
         private const float DURATION_S = 3.0f;
         private const float WIDTH = 440f;
+        private const int WINDOW_ID = 0xC1F1C2;
 
         private float m_HideAt;
         private string m_Text = string.Empty;
+        private OverlayTheme m_Theme = null!;
+        private Rect m_WindowRect;
 
         public void Show(string message)
         {
@@ -35,11 +38,20 @@ namespace VanillaProfiler.Overlay
             float width = Mathf.Min(WIDTH, Mathf.Max(0f, logicalW - margin * 2f));
             if (width <= 0f) return;
             var rect = new Rect(Mathf.Max(margin, (logicalW - width) * 0.5f), logicalH - h - 40f, width, h);
-            OverlayPanel.DrawFrame(theme, rect);
+            m_Theme = theme;
+            m_WindowRect = rect;
+            GUI.Window(WINDOW_ID, rect, DrawWindow, GUIContent.none, GUIStyle.none);
+            GUI.BringWindowToFront(WINDOW_ID);
+        }
+
+        private void DrawWindow(int windowId)
+        {
+            var rect = new Rect(0f, 0f, m_WindowRect.width, m_WindowRect.height);
+            OverlayPanel.DrawFrame(m_Theme, rect);
             GUI.Label(
-                new Rect(rect.x + OverlayPanel.PAD, rect.y + OverlayPanel.PAD,
+                new Rect(OverlayPanel.PAD, OverlayPanel.PAD,
                     rect.width - OverlayPanel.PAD * 2, OverlayPanel.LINE_H),
-                m_Text, theme.BadgeStyle);
+                m_Text, m_Theme.BadgeStyle);
         }
     }
 }

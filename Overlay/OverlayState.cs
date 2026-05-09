@@ -8,28 +8,53 @@ namespace VanillaProfiler.Overlay
     public sealed class OverlayState
     {
         public int ModeIndex { get; private set; }
+        public OverlayModeId ModeId { get; private set; } = OverlayModeId.Status;
         public Anchor Anchor { get; private set; } = Anchor.TopLeft;
 
-        public void Initialize(int defaultMode, int anchor, int modeCount)
+        public void Initialize(int persistedDefaultMode, int anchor, OverlayModeDescriptor[] modes)
         {
-            SetMode(defaultMode, modeCount);
+            SetMode(OverlayModeCatalog.FromPersisted(persistedDefaultMode), modes);
             Anchor = (Anchor)Mathf.Clamp(anchor, 0, 3);
         }
 
-        public void SetMode(int index, int modeCount)
+        public void SetMode(OverlayModeId id, OverlayModeDescriptor[] modes)
         {
-            if (modeCount <= 0)
+            if (modes == null || modes.Length <= 0)
             {
+                ModeId = OverlayModeId.Status;
                 ModeIndex = 0;
                 return;
             }
-            ModeIndex = Mathf.Clamp(index, 0, modeCount - 1);
+
+            for (int i = 0; i < modes.Length; i++)
+            {
+                if (modes[i].Id != id) continue;
+                ModeId = id;
+                ModeIndex = i;
+                return;
+            }
+
+            ModeId = modes[0].Id;
+            ModeIndex = 0;
         }
 
-        public void CycleMode(int modeCount)
+        public void SetModeByIndex(int index, OverlayModeDescriptor[] modes)
         {
-            if (modeCount <= 0) return;
-            SetMode(ModeIndex + 1, modeCount);
+            if (modes == null || modes.Length <= 0)
+            {
+                ModeId = OverlayModeId.Status;
+                ModeIndex = 0;
+                return;
+            }
+
+            ModeIndex = Mathf.Clamp(index, 0, modes.Length - 1);
+            ModeId = modes[ModeIndex].Id;
+        }
+
+        public void CycleMode(OverlayModeDescriptor[] modes)
+        {
+            if (modes == null || modes.Length <= 0) return;
+            SetModeByIndex((ModeIndex + 1) % modes.Length, modes);
         }
 
         public void SetAnchor(Anchor anchor)

@@ -76,15 +76,17 @@ namespace VanillaProfiler.Diagnostics
         {
             try
             {
-                long size = new FileInfo(path).Length;
-                if (size > MAX_SETTINGS_BYTES)
-                    throw new InvalidDataException(
-                        $"Settings JSON exceeds {MAX_SETTINGS_BYTES} bytes ({size}); refusing to load");
-
                 string json;
-                using (var reader = new StreamReader(path))
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
-                    json = reader.ReadToEnd();
+                    if (stream.Length > MAX_SETTINGS_BYTES)
+                        throw new InvalidDataException(
+                            $"Settings JSON exceeds {MAX_SETTINGS_BYTES} bytes ({stream.Length}); refusing to load");
+
+                    using (var reader = new StreamReader(stream))
+                    {
+                        json = reader.ReadToEnd();
+                    }
                 }
                 if (string.IsNullOrWhiteSpace(json))
                     throw new InvalidDataException("Empty settings JSON");
@@ -148,7 +150,7 @@ namespace VanillaProfiler.Diagnostics
             public int DefaultMode = 0;
             public int Anchor = 0;
             public int SparklineWidth = 60;
-            public bool SpikeScreenshots = true;
+            public bool SpikeScreenshots;
             public float SpikeThresholdMs = 100.0f;
             public float SyncPointThresholdMs = 0.5f;
             public bool SettingsPanelHotkey = true;

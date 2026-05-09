@@ -1,4 +1,6 @@
+using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using Unity.Entities;
 using VanillaProfiler.Diagnostics;
@@ -14,6 +16,16 @@ namespace VanillaProfiler
     public static class EntityCommandBufferPatch
     {
         private const string ECB_KEY = "ECB.Playback";
+
+#pragma warning disable CA1815
+        [StructLayout(LayoutKind.Auto)]
+        public struct PatchTimingMeasurement
+        {
+            public long StartTicks;
+            public bool Started;
+            public bool Completed;
+        }
+#pragma warning restore CA1815
 
         [HarmonyPatch(typeof(EntityCommandBuffer), nameof(EntityCommandBuffer.Playback), typeof(EntityManager))]
         public static class PlaybackEntityManager
@@ -32,15 +44,23 @@ namespace VanillaProfiler
             }
 
             [HarmonyPrefix]
-            public static void Prefix(out long __state)
+            public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Stopwatch.GetTimestamp();
+                __state = Begin();
             }
 
             [HarmonyPostfix]
-            public static void Postfix(long __state)
+            public static void Postfix(ref PatchTimingMeasurement __state)
             {
-                Complete(__state);
+                Complete(ref __state);
+            }
+
+            [HarmonyFinalizer]
+            public static Exception? Finalizer(ref PatchTimingMeasurement __state, Exception? __exception)
+            {
+                if (!__state.Started) return __exception;
+                Complete(ref __state);
+                return __exception;
             }
         }
 
@@ -61,23 +81,43 @@ namespace VanillaProfiler
             }
 
             [HarmonyPrefix]
-            public static void Prefix(out long __state)
+            public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Stopwatch.GetTimestamp();
+                __state = Begin();
             }
 
             [HarmonyPostfix]
-            public static void Postfix(long __state)
+            public static void Postfix(ref PatchTimingMeasurement __state)
             {
-                Complete(__state);
+                Complete(ref __state);
+            }
+
+            [HarmonyFinalizer]
+            public static Exception? Finalizer(ref PatchTimingMeasurement __state, Exception? __exception)
+            {
+                if (!__state.Started) return __exception;
+                Complete(ref __state);
+                return __exception;
             }
         }
 
-        private static void Complete(long startTicks)
+        private static PatchTimingMeasurement Begin()
+        {
+            return new PatchTimingMeasurement
+            {
+                StartTicks = Stopwatch.GetTimestamp(),
+                Started = true,
+                Completed = false,
+            };
+        }
+
+        private static void Complete(ref PatchTimingMeasurement measurement)
         {
             try
             {
-                ProfilerHost.TryGetPatchSurface()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - startTicks);
+                if (!measurement.Started || measurement.Completed) return;
+                measurement.Completed = true;
+                ProfilerHost.TryGetPatchSurface()?.RecordPhase(ECB_KEY, Stopwatch.GetTimestamp() - measurement.StartTicks);
             }
             catch { /* profiler — never crash game */ }
         }

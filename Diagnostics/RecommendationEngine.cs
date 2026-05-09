@@ -34,9 +34,10 @@ namespace VanillaProfiler.Diagnostics
 
             AddCriticalRecommendations(list, health, probed);
 
-            // Suggested-tier — render bound mild OR FPS poor without strong specifics.
+            // Suggested-tier — render-related mild OR FPS poor without strong specifics.
             bool perfTrouble = health.Overall == HealthLevel.Poor || health.Overall == HealthLevel.Ok;
-            bool renderHint = health.Bottleneck == BottleneckKind.RenderBound;
+            bool renderHint = health.Bottleneck == BottleneckKind.GpuBound
+                || health.Bottleneck == BottleneckKind.CpuRenderBound;
             AddRenderSuggestions(list, probed, perfTrouble || renderHint);
 
             // Mod isolation hint — only when a mod actually stands out by CPU.
@@ -55,11 +56,12 @@ namespace VanillaProfiler.Diagnostics
         private static void AddCriticalRecommendations(
             List<Recommendation> list, HealthReport health, GraphicsSettingsState probed)
         {
-            if (health.Bottleneck == BottleneckKind.RenderBound
-                && health.RenderSeverity == RenderBoundSeverity.Severe)
+            if ((health.Bottleneck == BottleneckKind.GpuBound
+                    || health.Bottleneck == BottleneckKind.CpuRenderBound)
+                && health.RenderSeverity == RenderSeverityLevel.Severe)
             {
                 AddLatencyRecommendation(list, health, probed);
-                AddVolumetricsRecommendation(list, probed);
+                AddVolumetricsRecommendation(list, health, probed);
             }
 
             if (health.MemoryLevel == HealthLevel.Poor || health.GrowthLevel == HealthLevel.Poor)
@@ -77,27 +79,30 @@ namespace VanillaProfiler.Diagnostics
         private static void AddLatencyRecommendation(
             List<Recommendation> list, HealthReport health, GraphicsSettingsState probed)
         {
+            if (health.RenderCause != RenderCause.GpuUnderutilizedByCpuRender) return;
             if (!probed.MaxFrameLatency.HasValue || probed.MaxFrameLatency.Value >= 3) return;
             list.Add(new Recommendation
             {
                 Level = RecommendationLevel.Critical,
                 Title = "Raise Max Frame Latency to 3",
                 Action = "Settings -> Graphics -> Max Frame Latency = 3",
-                Reason = health.GpuUnderutilized
-                    ? $"GPU sits at {health.GpuBoundPercent:F0}% — CPU render is the gate."
-                    : $"Currently {probed.MaxFrameLatency.Value} — locks GPU to CPU each frame.",
+                Reason = $"GPU sits at {health.GpuBusyPercent:F0}% — CPU render is the gate.",
             });
         }
 
-        private static void AddVolumetricsRecommendation(List<Recommendation> list, GraphicsSettingsState probed)
+        private static void AddVolumetricsRecommendation(
+            List<Recommendation> list, HealthReport health, GraphicsSettingsState probed)
         {
             if (probed.VolumetricsEnabled != true) return;
+            string reason = health.RenderCause == RenderCause.PresentWait
+                ? "Heavy GPU effect while the CPU is waiting on present."
+                : "Heavy render effect that can increase CPU submission and GPU cost.";
             list.Add(new Recommendation
             {
                 Level = RecommendationLevel.Critical,
                 Title = "Disable Volumetrics",
                 Action = "Settings -> Graphics -> Volumetrics = Off",
-                Reason = "Heaviest single GPU/CPU render cost.",
+                Reason = reason,
             });
         }
 

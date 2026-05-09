@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using VanillaProfiler.Aggregation;
 using VanillaProfiler.Diagnostics;
 
@@ -42,9 +43,6 @@ namespace VanillaProfiler.Output
         // after an IO failure must NOT truncate — that would erase the current run.
         private bool m_TruncateOnNextOpen = true;
 
-        // Reused across reports to avoid one List allocation per phase/system table.
-        private readonly List<KeyValuePair<string, PhaseData>> m_SortBuffer = new();
-
         public LogFileSink(string logDir)
         {
             m_LogDir = logDir;
@@ -69,7 +67,7 @@ namespace VanillaProfiler.Output
                 SystemLogLevel.Unknown => "[INFO]",
                 _ => "[INFO]",
             };
-            WriteLine(Inv($"{DateTime.Now:HH:mm:ss} {tag} {message}"));
+            WriteSystemLine(Inv($"{DateTime.Now:HH:mm:ss} {tag} {message}"));
         }
 
         public void Shutdown()
@@ -85,114 +83,131 @@ namespace VanillaProfiler.Output
         public void WriteReport(int reportNumber, OverlaySnapshot snapshot, HealthReport health,
             MetricsSample metrics, MemorySample memory)
         {
-            // Hold the write lock for the whole report so an off-thread WriteSystemMessage
-            // (e.g. MainThreadGuard violation log) cannot interleave between report lines.
-            // C# lock is re-entrant on the same thread — nested WriteLine calls below
-            // re-acquire the lock cheaply without deadlocking.
-            lock (m_WriteLock)
-            {
-                WriteLine("");
-                WriteLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot.WindowSeconds:F1}s) ══════"));
-
-                if (metrics.FrameCount > 0)
-                {
-                    WriteLine(Inv($"Render: {snapshot.AvgFps:F1} FPS ({snapshot.MinFps:F1} min) | Frame: {snapshot.AvgFrameMs:F1}ms avg, {snapshot.MaxFrameMs:F1}ms max | Sim: {snapshot.SimTicksPerSec:F0} ticks/s"));
-                    WriteLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
-                }
-
-                WritePhaseTable(metrics.Phases);
-                WriteSystemTable("TOP MODS (self main-thread cost)", metrics.ModAggregate, 10);
-                WriteSystemTable("VANILLA SYSTEMS — self main-thread cost (top 15)", metrics.VanillaSystems, 15);
-                WriteSystemTable("MOD SYSTEMS — self main-thread cost (top 15)", metrics.ModSystems, 15);
-                // Patched vanilla systems are tracked in their own bucket
-                // because their elapsed time blends the patching mod's prefix
-                // with the vanilla original. Surfacing the table per cycle
-                // means a bug-report log carries the same signal the overlay
-                // shows — without it the only patched-vanilla ms data lives
-                // off-disk in the snapshot.
-                WriteSystemTable("PATCHED VANILLA SYSTEMS — total Update ms (mod+vanilla split unknown)",
-                    metrics.PatchedVanillaSystems, 15, useInclusiveAsPrimary: true);
-                WriteMemorySection(memory);
-                WriteHealthSummary(health);
-            }
+            string text = BuildReportText(reportNumber, snapshot, health, metrics, memory);
+            WriteReportText(text);
         }
 
-        public void WriteLine(string msg)
+        private string BuildReportText(int reportNumber, OverlaySnapshot snapshot, HealthReport health,
+            MetricsSample metrics, MemorySample memory)
+        {
+            var sb = new StringBuilder(8192);
+            sb.AppendLine();
+            sb.AppendLine(Inv($"══════ Report #{reportNumber} ({DateTime.Now:HH:mm:ss}, {snapshot.WindowSeconds:F1}s) ══════"));
+
+            if (metrics.FrameCount > 0)
+            {
+                sb.AppendLine(Inv($"Render: {snapshot.AvgFps:F1} FPS ({snapshot.MinFps:F1} min) | Frame: {snapshot.AvgFrameMs:F1}ms avg, {snapshot.MaxFrameMs:F1}ms max | Sim: {snapshot.SimTicksPerSec:F0} ticks/s"));
+                sb.AppendLine(Inv($"Spikes: {metrics.Spikes30} below 30fps, {metrics.Spikes20} below 20fps"));
+            }
+
+            AppendPhaseTable(sb, metrics.Phases);
+            AppendSystemTable(sb, "TOP MODS (self main-thread cost)", metrics.ModAggregate, 10);
+            AppendSystemTable(sb, "VANILLA SYSTEMS — self main-thread cost (top 15)", metrics.VanillaSystems, 15);
+            AppendSystemTable(sb, "MOD SYSTEMS — self main-thread cost (top 15)", metrics.ModSystems, 15);
+            // Patched vanilla systems are tracked in their own bucket because their
+            // elapsed time blends the patching mod's prefix with the vanilla original.
+            // Surfacing the table per cycle means a bug-report log carries the same
+            // signal the overlay shows.
+            AppendSystemTable(sb, "PATCHED VANILLA SYSTEMS — total Update ms (mod+vanilla split unknown)",
+                metrics.PatchedVanillaSystems, 15, useInclusiveAsPrimary: true);
+            AppendMemorySection(sb, memory);
+            AppendHealthSummary(sb, health);
+            return sb.ToString();
+        }
+
+        private void WriteReportText(string text)
         {
             lock (m_WriteLock)
             {
-                if (m_Shutdown) return;
-                try
-                {
-                    if (m_Writer == null && DateTime.UtcNow < m_NextOpenRetryUtc)
-                        return;
-                    if (m_Writer == null && !TryOpenWriter())
-                        return;
-                    m_Writer?.WriteLine(msg);
-                }
-                catch (Exception ex)
-                {
-                    // CloseWriter calls StreamWriter.Dispose which itself flushes buffered
-                    // bytes and can throw IOException on disk full. The original write
-                    // failure is more interesting than a chained close failure, so guard
-                    // the close and force the writer field clear regardless. Mirrors
-                    // Shutdown's pattern.
-                    try { CloseWriter(); }
-                    catch { /* secondary IO failure — primary one is reported below */ }
-                    m_Writer = null;
-                    m_NextOpenRetryUtc = DateTime.UtcNow.AddSeconds(5);
-                    WarnIoFailure("write", ex);
-                }
+                WriteText(text, flush: true);
             }
         }
 
-        // ---------- Section writers ----------
+        private void WriteSystemLine(string msg)
+        {
+            lock (m_WriteLock)
+            {
+                WriteText(msg + Environment.NewLine, flush: false);
+            }
+        }
 
-        private void WritePhaseTable(IReadOnlyDictionary<string, PhaseData> phases)
+        private void WriteText(string text, bool flush)
+        {
+            if (m_Shutdown) return;
+            try
+            {
+                if (m_Writer == null && DateTime.UtcNow < m_NextOpenRetryUtc)
+                    return;
+                if (m_Writer == null && !TryOpenWriter())
+                    return;
+                if (m_Writer == null) return;
+                m_Writer.Write(text);
+                if (flush)
+                    m_Writer.Flush();
+            }
+            catch (Exception ex)
+            {
+                // CloseWriter calls StreamWriter.Dispose which itself flushes buffered
+                // bytes and can throw IOException on disk full. The original write
+                // failure is more interesting than a chained close failure, so guard
+                // the close and force the writer field clear regardless. Mirrors
+                // Shutdown's pattern.
+                try { CloseWriter(); }
+                catch { /* secondary IO failure — primary one is reported below */ }
+                m_Writer = null;
+                m_NextOpenRetryUtc = DateTime.UtcNow.AddSeconds(5);
+                WarnIoFailure("write", ex);
+            }
+        }
+
+        // ---------- Section appenders ----------
+
+        private static void AppendPhaseTable(StringBuilder sb, IReadOnlyDictionary<string, PhaseData> phases)
         {
             if (phases.Count == 0) return;
-            m_SortBuffer.Clear();
-            foreach (var kvp in phases) m_SortBuffer.Add(kvp);
-            m_SortBuffer.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
-            WriteLine("");
-            WriteLine($"{"PHASE",-35} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
-            WriteLine(new string('─', 79));
-            for (int i = 0; i < m_SortBuffer.Count; i++)
+            var rows = new List<KeyValuePair<string, PhaseData>>(phases.Count);
+            foreach (var kvp in phases) rows.Add(kvp);
+            rows.Sort(static (a, b) => b.Value.TotalTicks.CompareTo(a.Value.TotalTicks));
+            sb.AppendLine();
+            sb.AppendLine($"{"PHASE",-35} {"CALLS",6} {"TOTAL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
+            sb.AppendLine(new string('─', 79));
+            for (int i = 0; i < rows.Count; i++)
             {
-                var kvp = m_SortBuffer[i];
+                var kvp = rows[i];
                 var d = kvp.Value;
                 double totalMs = d.TotalTicks * MS_PER_SEC / Stopwatch.Frequency;
                 double avgMs = d.CallCount > 0 ? totalMs / d.CallCount : 0;
                 double maxMs = d.MaxTicks * MS_PER_SEC / Stopwatch.Frequency;
-                WriteLine(Inv($"{kvp.Key,-35} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}"));
+                sb.AppendLine(Inv($"{kvp.Key,-35} {d.CallCount,6} {totalMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}"));
             }
         }
 
-        private void WriteSystemTable(
+        private static void AppendSystemTable(
+            StringBuilder sb,
             string header,
             IReadOnlyDictionary<string, PhaseData> systems,
             int maxRows,
             bool useInclusiveAsPrimary = false)
         {
             if (systems.Count == 0) return;
-            m_SortBuffer.Clear();
-            foreach (var kvp in systems) m_SortBuffer.Add(kvp);
+            var rows = new List<KeyValuePair<string, PhaseData>>(systems.Count);
+            foreach (var kvp in systems) rows.Add(kvp);
             if (useInclusiveAsPrimary)
-                m_SortBuffer.Sort(static (a, b) => b.Value.InclusiveTicks.CompareTo(a.Value.InclusiveTicks));
+                rows.Sort(static (a, b) => b.Value.InclusiveTicks.CompareTo(a.Value.InclusiveTicks));
             else
-                m_SortBuffer.Sort(static (a, b) => b.Value.SelfTicks.CompareTo(a.Value.SelfTicks));
-            WriteLine("");
-            WriteLine(header);
+                rows.Sort(static (a, b) => b.Value.SelfTicks.CompareTo(a.Value.SelfTicks));
+            sb.AppendLine();
+            sb.AppendLine(header);
             // SYNC? column = number of individual Update() calls > SyncPointThresholdMs.
             // A non-zero value means the system did real main-thread work (sync point,
             // structural change, ECB playback, synchronous foreach), not just scheduling.
             string primaryHeader = useInclusiveAsPrimary ? "TOTAL" : "SELF";
-            WriteLine($"{"SYSTEM",-45} {"CALLS",6} {primaryHeader,10} {"INCL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
-            WriteLine(new string('─', 101));
+            sb.AppendLine($"{"SYSTEM",-45} {"CALLS",6} {primaryHeader,10} {"INCL",10} {"AVG",8} {"MAX",8} {"SYNC?",6}");
+            sb.AppendLine(new string('─', 101));
             int shown = 0;
-            for (int i = 0; i < m_SortBuffer.Count && shown < maxRows; i++)
+            for (int i = 0; i < rows.Count && shown < maxRows; i++)
             {
-                var kvp = m_SortBuffer[i];
+                var kvp = rows[i];
                 var d = kvp.Value;
                 long primaryTicks = useInclusiveAsPrimary ? d.InclusiveTicks : d.SelfTicks;
                 double primaryMs = primaryTicks * MS_PER_SEC / Stopwatch.Frequency;
@@ -201,88 +216,88 @@ namespace VanillaProfiler.Output
                 double avgMs = d.CallCount > 0 ? primaryMs / d.CallCount : 0;
                 double maxMs = d.MaxTicks * MS_PER_SEC / Stopwatch.Frequency;
                 string flag = d.SyncPointSuspectCount > 0 ? "  [likely sync point]" : "";
-                WriteLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {primaryMs,9:F1}ms {inclusiveMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}{flag}"));
+                sb.AppendLine(Inv($"{kvp.Key,-45} {d.CallCount,6} {primaryMs,9:F1}ms {inclusiveMs,9:F1}ms {avgMs,7:F2}ms {maxMs,7:F1}ms {d.SyncPointSuspectCount,6}{flag}"));
                 shown++;
             }
         }
 
-        private void WriteMemorySection(MemorySample mem)
+        private static void AppendMemorySection(StringBuilder sb, MemorySample mem)
         {
             if (mem.BaselineJustCaptured)
             {
-                WriteMemoryBaseline(mem);
-                WriteCounterAvailability(mem);
+                AppendMemoryBaseline(sb, mem);
+                AppendCounterAvailability(sb, mem);
                 return;
             }
 
-            WriteMemoryDeltas(mem);
-            WriteHardwareCounters(mem);
-            WriteRenderCounters(mem);
-            WriteCounterAvailability(mem);
+            AppendMemoryDeltas(sb, mem);
+            AppendHardwareCounters(sb, mem);
+            AppendRenderCounters(sb, mem);
+            AppendCounterAvailability(sb, mem);
         }
 
-        private void WriteMemoryBaseline(MemorySample mem)
+        private static void AppendMemoryBaseline(StringBuilder sb, MemorySample mem)
         {
-            WriteLine("");
-            WriteLine("MEMORY BASELINE");
-            WriteLine(new string('─', 50));
-            WriteLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB"));
-            WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB"));
-            WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB"));
-            WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB"));
+            sb.AppendLine();
+            sb.AppendLine("MEMORY BASELINE");
+            sb.AppendLine(new string('─', 50));
+            sb.AppendLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB"));
+            sb.AppendLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB"));
+            sb.AppendLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB"));
+            sb.AppendLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.GfxUsedBytes > 0)
-                WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                sb.AppendLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.AudioUsedBytes > 0)
-                WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                sb.AppendLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.SystemUsedBytes > 0)
-                WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                sb.AppendLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.AppResidentBytes > 0)
-                WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB  (real physical RAM)"));
+                sb.AppendLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB  (real physical RAM)"));
         }
 
-        private void WriteMemoryDeltas(MemorySample mem)
+        private static void AppendMemoryDeltas(StringBuilder sb, MemorySample mem)
         {
-            WriteLine("");
-            WriteLine(Inv($"MEMORY (delta from baseline)  |  Managed growth: {mem.ManagedGrowthMBperSec:+0.00;-0.00} MB/s"));
-            WriteLine(new string('─', 50));
-            WriteLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.ManagedDelta)})"));
-            WriteLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.MonoHeapDelta)})"));
-            WriteLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeAllocDelta)})"));
-            WriteLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeReservedDelta)})"));
+            sb.AppendLine();
+            sb.AppendLine(Inv($"MEMORY (delta from baseline)  |  Managed growth: {mem.ManagedGrowthMBperSec:+0.00;-0.00} MB/s"));
+            sb.AppendLine(new string('─', 50));
+            sb.AppendLine(Inv($"  Managed (GC):     {mem.ManagedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.ManagedDelta)})"));
+            sb.AppendLine(Inv($"  Mono Heap:        {mem.MonoHeapBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.MonoHeapDelta)})"));
+            sb.AppendLine(Inv($"  Native Alloc:     {mem.NativeAllocBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeAllocDelta)})"));
+            sb.AppendLine(Inv($"  Native Reserved:  {mem.NativeReservedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.NativeReservedDelta)})"));
             if (mem.GfxUsedBytes > 0)
-                WriteLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.GfxUsedDelta)})"));
+                sb.AppendLine(Inv($"  Gfx (GPU):        {mem.GfxUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.GfxUsedDelta)})"));
             if (mem.AudioUsedBytes > 0)
-                WriteLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.AudioUsedDelta)})"));
+                sb.AppendLine(Inv($"  Audio:            {mem.AudioUsedBytes / BYTES_PER_MB,8:F1} MB  ({DeltaMB(mem.AudioUsedDelta)})"));
             if (mem.SystemUsedBytes > 0)
-                WriteLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
+                sb.AppendLine(Inv($"  System total:     {mem.SystemUsedBytes / BYTES_PER_MB,8:F1} MB"));
             if (mem.AppResidentBytes > 0)
-                WriteLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB"));
+                sb.AppendLine(Inv($"  Process RSS:      {mem.AppResidentBytes / BYTES_PER_MB,8:F1} MB"));
         }
 
-        private void WriteHardwareCounters(MemorySample mem)
+        private static void AppendHardwareCounters(StringBuilder sb, MemorySample mem)
         {
             if (mem.UsedBuffersBytes > 0 || mem.RenderTexturesBytes > 0)
-                WriteLine(Inv($"  GPU breakdown:    Buffers {mem.UsedBuffersBytes / BYTES_PER_MB,7:F1} MB ({mem.UsedBuffersCount} bufs),  RT {mem.RenderTexturesBytes / BYTES_PER_MB,7:F1} MB"));
+                sb.AppendLine(Inv($"  GPU breakdown:    Buffers {mem.UsedBuffersBytes / BYTES_PER_MB,7:F1} MB ({mem.UsedBuffersCount} bufs),  RT {mem.RenderTexturesBytes / BYTES_PER_MB,7:F1} MB"));
             if (mem.MainThreadCpuNs > 0 || mem.RenderThreadCpuNs > 0)
-                WriteLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
+                sb.AppendLine(Inv($"  CPU threads:      Main {mem.MainThreadCpuNs / 1_000_000.0,5:F2} ms,  Render {mem.RenderThreadCpuNs / 1_000_000.0,5:F2} ms  (Unity ProfilerRecorder avg)"));
             if (mem.PresentWaitNs > 0)
-                WriteLine(Inv($"  Present wait:     {mem.PresentWaitNs / 1_000_000.0,5:F2} ms  (CPU stalled on GPU swapchain)"));
+                sb.AppendLine(Inv($"  Present wait:     {mem.PresentWaitNs / 1_000_000.0,5:F2} ms  (CPU stalled on GPU swapchain)"));
         }
 
-        private void WriteRenderCounters(MemorySample mem)
+        private static void AppendRenderCounters(StringBuilder sb, MemorySample mem)
         {
             if (mem.DrawCallsCount > 0 || mem.SetPassCallsCount > 0 || mem.TrianglesCount > 0)
             {
-                WriteLine(Inv($"  Render counts:    DrawCalls {mem.DrawCallsCount,5},  SetPass {mem.SetPassCallsCount,4},  Shadow casters {mem.ShadowCastersCount,5}"));
-                WriteLine(Inv($"                    Tris {mem.TrianglesCount / 1000,6:N0}K,  Verts {mem.VerticesCount / 1000,6:N0}K"));
+                sb.AppendLine(Inv($"  Render counts:    DrawCalls {mem.DrawCallsCount,5},  SetPass {mem.SetPassCallsCount,4},  Shadow casters {mem.ShadowCastersCount,5}"));
+                sb.AppendLine(Inv($"                    Tris {mem.TrianglesCount / 1000,6:N0}K,  Verts {mem.VerticesCount / 1000,6:N0}K"));
             }
             if (mem.GcCollectCount > 0)
-                WriteLine(Inv($"  GC.Collect:       {mem.GcCollectCount} collections,  total stall {mem.GcCollectTotalNs / 1_000_000.0,6:F2} ms"));
+                sb.AppendLine(Inv($"  GC.Collect:       {mem.GcCollectCount} collections,  total stall {mem.GcCollectTotalNs / 1_000_000.0,6:F2} ms"));
         }
 
-        private void WriteCounterAvailability(MemorySample mem)
+        private static void AppendCounterAvailability(StringBuilder sb, MemorySample mem)
         {
-            WriteLine(ReportTextSections.CompactCounterStatus(
+            sb.AppendLine(ReportTextSections.CompactCounterStatus(
                 mem.MainThreadCpuAvailable,
                 mem.RenderThreadCpuAvailable,
                 mem.GpuFrameTimeAvailable,
@@ -292,14 +307,14 @@ namespace VanillaProfiler.Output
                 mem.GcCollectAvailable));
         }
 
-        private void WriteHealthSummary(HealthReport h)
+        private static void AppendHealthSummary(StringBuilder sb, HealthReport h)
         {
-            WriteLine("");
-            WriteLine($"HEALTH  FPS:{h.FpsLevel}  STUTTER:{h.StutterLevel}  MEM:{h.MemoryLevel}  GROWTH:{h.GrowthLevel}  →  OVERALL:{h.Overall}");
-            WriteLine($"BOTTLENECK  {h.Bottleneck}  —  {h.BottleneckHint}");
+            sb.AppendLine();
+            sb.AppendLine($"HEALTH  FPS:{h.FpsLevel}  STUTTER:{h.StutterLevel}  MEM:{h.MemoryLevel}  GROWTH:{h.GrowthLevel}  →  OVERALL:{h.Overall}");
+            sb.AppendLine($"BOTTLENECK  {BottleneckText(h)}  —  {h.BottleneckHint}");
             if (!string.IsNullOrEmpty(h.MemoryHint)
                 && !string.Equals(h.MemoryHint, "Stable", StringComparison.Ordinal))
-                WriteLine($"MEMORY  {h.MemoryHint}");
+                sb.AppendLine($"MEMORY  {h.MemoryHint}");
         }
 
         private static string DeltaMB(long bytes)
@@ -366,10 +381,11 @@ namespace VanillaProfiler.Output
 
         private static StreamWriter CreateInitializedWriter(Stream stream)
         {
-            var writer = new StreamWriter(stream) { AutoFlush = true };
+            var writer = new StreamWriter(stream) { AutoFlush = false };
             try
             {
                 WriteSessionHeader(writer);
+                writer.Flush();
                 return writer;
             }
             catch
@@ -397,6 +413,13 @@ namespace VanillaProfiler.Output
         }
 
         private static string Inv(FormattableString value) => FormattableString.Invariant(value);
+
+        private static string BottleneckText(HealthReport health)
+        {
+            return health.RenderCause == RenderCause.None
+                ? health.Bottleneck.ToString()
+                : $"{health.Bottleneck}/{health.RenderCause}";
+        }
 
         public static string GetLogDirectory(string persistentDataPath)
             => Path.Combine(persistentDataPath, LOG_DIR_NAME);

@@ -60,23 +60,23 @@ namespace VanillaProfiler.Diagnostics
         }
 
         private static void AppendReplacements(
-            StringBuilder sb, IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> rows)
+            StringBuilder sb, IReadOnlyList<ReplacedVanillaSystemRow> rows)
         {
             if (rows == null || rows.Count == 0) return;
             sb.AppendLine("--- Patched Vanilla Systems (total Update ms, mod+vanilla split unknown) ---");
             AppendReplacementOwnerSummary(sb, rows);
-            foreach (var (sys, owner, ms) in rows)
-                sb.AppendLine(Inv($"  {sys,-40} {ms,8:F1} ms  <- {owner}"));
+            foreach (var row in rows)
+                sb.AppendLine(Inv($"  {row.VanillaSystem,-40} {row.TotalMs,8:F1} ms  <- {row.OwnerText}"));
             sb.AppendLine();
         }
 
         private static void AppendReplacementOwnerSummary(
-            StringBuilder sb, IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> rows)
+            StringBuilder sb, IReadOnlyList<ReplacedVanillaSystemRow> rows)
         {
             var counts = new Dictionary<string, int>(StringComparer.Ordinal);
             for (int i = 0; i < rows.Count; i++)
             {
-                string owner = rows[i].OwnerMod;
+                string owner = rows[i].OwnerText;
                 if (string.IsNullOrEmpty(owner)) continue;
                 counts.TryGetValue(owner, out int count);
                 counts[owner] = count + 1;

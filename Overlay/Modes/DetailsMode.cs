@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using VanillaProfiler.Diagnostics;
 
@@ -17,6 +18,13 @@ namespace VanillaProfiler.Overlay.Modes
         // systems doesn't push the rest of the panel off-screen. Full list is
         // always in PERF.log; this is a glance summary.
         private const int REPLACEMENTS_LIMIT = 6;
+
+        private OverlaySnapshot? m_CachedSnapshot;
+        private IReadOnlyList<string> m_CachedTopModRows = Array.Empty<string>();
+        private IReadOnlyList<string> m_CachedTopVanillaRows = Array.Empty<string>();
+        private IReadOnlyList<string> m_CachedTopSystemRows = Array.Empty<string>();
+        private IReadOnlyList<string> m_CachedReplacementRows = Array.Empty<string>();
+        private int m_CachedReplacementOverflow;
 
         public string DisplayName => "Details";
         public bool IsHidden => false;
@@ -79,7 +87,7 @@ namespace VanillaProfiler.Overlay.Modes
 
             if (health != null)
                 OverlayPanel.DrawLine(ctx,
-                    $"Bottleneck:    {health.Bottleneck} — {health.BottleneckHint}",
+                    $"Bottleneck:    {BottleneckText(health)} — {health.BottleneckHint}",
                     ctx.Theme.StyleForBottleneck(health.Bottleneck));
 
             if (CityContext.HasData)
@@ -87,37 +95,86 @@ namespace VanillaProfiler.Overlay.Modes
                     $"City:          {OverlayFormat.Count(CityContext.Citizens)} pop, {OverlayFormat.Count(CityContext.Vehicles)} vehicles, {OverlayFormat.Count(CityContext.Buildings)} buildings",
                     ctx.Theme.DimStyle);
 
-            OverlayPanel.DrawTopTable(ctx, "Top mods (self main-thread ms)", snapshot.TopMods);
-            OverlayPanel.DrawTopTable(ctx, "Top vanilla systems (self main-thread cost)", snapshot.TopVanillaSystems);
-            OverlayPanel.DrawTopTable(ctx, "Top mod systems (self main-thread cost)", snapshot.TopModSystems);
-            DrawReplacements(ctx, snapshot.ReplacedVanillaSystems);
+            EnsureCachedRows(snapshot);
+            DrawCachedTable(ctx, "Top mods (self main-thread ms)", m_CachedTopModRows);
+            DrawCachedTable(ctx, "Top vanilla systems (self main-thread cost)", m_CachedTopVanillaRows);
+            DrawCachedTable(ctx, "Top mod systems (self main-thread cost)", m_CachedTopSystemRows);
+            DrawReplacements(ctx, m_CachedReplacementRows, m_CachedReplacementOverflow);
+        }
+
+        private void EnsureCachedRows(OverlaySnapshot snapshot)
+        {
+            if (ReferenceEquals(m_CachedSnapshot, snapshot)) return;
+            m_CachedSnapshot = snapshot;
+            m_CachedTopModRows = BuildTopRows(snapshot.TopMods);
+            m_CachedTopVanillaRows = BuildTopRows(snapshot.TopVanillaSystems);
+            m_CachedTopSystemRows = BuildTopRows(snapshot.TopModSystems);
+            m_CachedReplacementRows = BuildReplacementRows(snapshot.ReplacedVanillaSystems, out m_CachedReplacementOverflow);
+        }
+
+        private static IReadOnlyList<string> BuildTopRows(IReadOnlyList<(string Name, double TotalMs)> rows)
+        {
+            if (rows == null || rows.Count == 0) return Array.Empty<string>();
+            var result = new string[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+                result[i] = $"  {OverlayFormat.Truncate(rows[i].Name, 36),-36}  {rows[i].TotalMs,7:F1} ms";
+            return result;
+        }
+
+        private static IReadOnlyList<string> BuildReplacementRows(
+            IReadOnlyList<ReplacedVanillaSystemRow> items,
+            out int overflow)
+        {
+            overflow = 0;
+            if (items == null || items.Count == 0) return Array.Empty<string>();
+
+            int shown = items.Count > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : items.Count;
+            overflow = items.Count - shown;
+            var result = new string[shown];
+            for (int i = 0; i < shown; i++)
+            {
+                var item = items[i];
+                string sys = OverlayFormat.Truncate(item.VanillaSystem, 38);
+                result[i] = $"  {sys,-38}  {item.TotalMs,6:F1} ms  ← {item.OwnerText}";
+            }
+            return result;
+        }
+
+        private static void DrawCachedTable(DrawContext ctx, string title, IReadOnlyList<string> rows)
+        {
+            if (rows == null || rows.Count == 0) return;
+            OverlayPanel.DrawSection(ctx, title);
+            for (int i = 0; i < rows.Count; i++)
+                OverlayPanel.DrawLine(ctx, rows[i], ctx.Theme.BodyStyle);
         }
 
         private static void DrawReplacements(
-            DrawContext ctx, IReadOnlyList<(string VanillaSystem, string OwnerMod, double TotalMs)> items)
+            DrawContext ctx,
+            IReadOnlyList<string> rows,
+            int overflow)
         {
-            if (items == null || items.Count == 0) return;
+            if (rows == null || rows.Count == 0) return;
             // The ms is honest total Update elapsed time. We can't split it
             // between the patching mod's prefix and the (possibly skipped)
             // vanilla original — Harmony does not expose a hook between
             // them. Header reflects that: cost is shown, attribution split
             // is what's not measurable.
             OverlayPanel.DrawSection(ctx, "Patched vanilla systems (total Update ms, mod+vanilla split unknown)");
-            int shown = items.Count > REPLACEMENTS_LIMIT ? REPLACEMENTS_LIMIT : items.Count;
-            for (int i = 0; i < shown; i++)
-            {
-                var item = items[i];
-                string sys = OverlayFormat.Truncate(item.VanillaSystem, 38);
+            for (int i = 0; i < rows.Count; i++)
+                OverlayPanel.DrawLine(ctx, rows[i], ctx.Theme.BodyStyle);
+            if (overflow > 0)
                 OverlayPanel.DrawLine(ctx,
-                    $"  {sys,-38}  {item.TotalMs,6:F1} ms  ← {item.OwnerMod}",
-                    ctx.Theme.BodyStyle);
-            }
-            if (items.Count > shown)
-                OverlayPanel.DrawLine(ctx,
-                    $"  +{items.Count - shown} more — see VanillaProfiler.log",
+                    $"  +{overflow} more — see VanillaProfiler.log",
                     ctx.Theme.DimStyle);
         }
 
         private static bool HasItems(IReadOnlyCollection<(string, double)> rows) => rows != null && rows.Count > 0;
+
+        private static string BottleneckText(HealthReport health)
+        {
+            return health.RenderCause == RenderCause.None
+                ? health.Bottleneck.ToString()
+                : $"{health.Bottleneck}/{health.RenderCause}";
+        }
     }
 }

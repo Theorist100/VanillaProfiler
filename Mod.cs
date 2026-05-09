@@ -157,6 +157,7 @@ namespace VanillaProfiler
             TryCleanup("reset attribution", ModAttribution.Reset);
             TryCleanup("reset auto-profiler", SystemAutoProfiler.Reset);
             TryCleanup("reset replacement detector", SystemReplacementDetector.Reset);
+            TryCleanup("reset harmony conflict detector", HarmonyConflictDetector.Reset);
             TryCleanup("reset city context", CityContext.Reset);
             TryCleanup("clear buffered log messages", ModLog.ClearBuffer);
             m_Harmony = null;

@@ -15,29 +15,46 @@ namespace VanillaProfiler.Output
     public static class ReportExporter
     {
         private const int LOG_TAIL_LINES = 50;
+        private const double SUMMARY_HEAVY_SYSTEM_MS = 10.0;
+        private const double SUMMARY_HEAVY_MOD_MS = 10.0;
+        private const string PROFILER_MOD_NAME = "VanillaProfiler";
 
-        /// <returns>Full path of the saved report, or null on failure.</returns>
-        public static string? Export()
+        public static ExportResult Export()
         {
+            string? path = null;
+            string? report = null;
             try
             {
                 string dir = Path.Combine(Application.persistentDataPath, "Reports");
                 Directory.CreateDirectory(dir);
 
                 string fileName = $"CSII_Report_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt";
-                string path = Path.Combine(dir, fileName);
+                path = Path.Combine(dir, fileName);
 
-                string report = BuildReport();
+                report = BuildReport();
                 AtomicFileWriter.WriteAllText(path, report, Encoding.UTF8);
                 ModLog.Info($"Performance report saved: {path}");
-                WriteSupportBundle(path, report);
-                return path;
             }
             catch (Exception ex)
             {
                 ModLog.Warn($"Report export failed: {ex}");
-                return null;
+                return new ExportResult(
+                    reportPath: path,
+                    zipPath: null,
+                    zipWarnings: Array.Empty<string>(),
+                    error: ex.Message,
+                    reportWritten: false,
+                    zipWritten: false);
             }
+
+            var bundle = WriteSupportBundle(path, report);
+            return new ExportResult(
+                reportPath: path,
+                zipPath: bundle.ZipPath,
+                zipWarnings: bundle.Warnings,
+                error: bundle.Error,
+                reportWritten: true,
+                zipWritten: bundle.ZipWritten);
         }
 
         private static string BuildReport()
@@ -52,6 +69,8 @@ namespace VanillaProfiler.Output
             sb.AppendLine($"Game version:     {Application.version}");
             sb.AppendLine($"Unity:            {Application.unityVersion}");
             sb.AppendLine();
+            AppendSummary(sb, snap, health);
+
             sb.AppendLine("--- Scope of measurement ---");
             sb.AppendLine("  Top per-system numbers below use self/exclusive main-thread cost — scheduling");
             sb.AppendLine("  overhead, sync points (Dependency.Complete / CompleteDependencyBeforeRO),");
@@ -78,6 +97,101 @@ namespace VanillaProfiler.Output
                 sb.AppendLine(line);
 
             return sb.ToString();
+        }
+
+        private static void AppendSummary(StringBuilder sb, OverlaySnapshot? snap, HealthReport? health)
+        {
+            sb.AppendLine("--- Summary ---");
+            if (snap == null || health == null)
+            {
+                sb.AppendLine("Overall:          No report window yet");
+                sb.AppendLine("Action:           Load a city and wait for the first report window.");
+                sb.AppendLine();
+                return;
+            }
+
+            sb.AppendLine($"Overall:          {health.Overall}");
+            sb.AppendLine($"Bottleneck:       {BottleneckText(health)} - {health.BottleneckHint}");
+            sb.AppendLine(Inv($"Frame:            {snap.AvgFps:F1} FPS avg, {snap.AvgFrameMs:F1} ms avg, {snap.MaxFrameMs:F1} ms max"));
+            sb.AppendLine($"Memory:           {health.MemoryLevel}, growth {health.GrowthLevel} ({health.MemoryHint})");
+            AppendSummaryTopMod(sb, snap);
+            AppendSummaryTopSystem(sb, snap);
+            sb.AppendLine(Inv($"Profiler cost:    {snap.ProfilerSelfMs:F2} ms/frame ({snap.ProfilerSelfPercent:F2}% of frame)"));
+            sb.AppendLine($"Action:           {SummaryAction(snap, health)}");
+            sb.AppendLine();
+        }
+
+        private static void AppendSummaryTopMod(StringBuilder sb, OverlaySnapshot snap)
+        {
+            if (TryFirstNonProfilerMod(snap.TopMods, out var top))
+                sb.AppendLine(Inv($"Top mod:          {top.ModName} - {top.TotalMs:F1} ms self in {WindowLabel(snap)}"));
+            else
+                sb.AppendLine("Top mod:          (none)");
+        }
+
+        private static void AppendSummaryTopSystem(StringBuilder sb, OverlaySnapshot snap)
+        {
+            if (TryFirstNonProfilerSystem(snap.TopModSystems, out var top))
+                sb.AppendLine(Inv($"Top mod system:   {top.Name} - {top.TotalMs:F1} ms self"));
+            else
+                sb.AppendLine("Top mod system:   (none)");
+        }
+
+        private static string SummaryAction(OverlaySnapshot snap, HealthReport health)
+        {
+            if (health.MemoryLevel == HealthLevel.Poor || health.GrowthLevel == HealthLevel.Poor)
+                return "Check managed memory growth first; compare another export after 60 seconds.";
+
+            if (TryFirstNonProfilerSystem(snap.TopModSystems, out var system) && system.TotalMs >= SUMMARY_HEAVY_SYSTEM_MS)
+                return $"Inspect {system.Name} first; it is the heaviest mod system in this window.";
+
+            if (TryFirstNonProfilerMod(snap.TopMods, out var mod) && mod.TotalMs >= SUMMARY_HEAVY_MOD_MS)
+                return $"Inspect {mod.ModName} first; it leads mod self-time in this window.";
+
+            if (health.Overall == HealthLevel.Good)
+                return "No obvious profiler-level problem in the last report window.";
+
+            return "Review Health and Top Mods/Systems below; no single mod system dominates this window.";
+        }
+
+        private static bool TryFirstNonProfilerMod(
+            IReadOnlyList<(string ModName, double TotalMs)>? mods,
+            out (string ModName, double TotalMs) value)
+        {
+            value = default;
+            if (mods == null || mods.Count == 0) return false;
+
+            for (int i = 0; i < mods.Count; i++)
+            {
+                var entry = mods[i];
+                if (string.IsNullOrEmpty(entry.ModName)) continue;
+                if (string.Equals(entry.ModName, PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
+                value = entry;
+                return true;
+            }
+
+            value = mods[0];
+            return !string.IsNullOrEmpty(value.ModName);
+        }
+
+        private static bool TryFirstNonProfilerSystem(
+            IReadOnlyList<(string Name, double TotalMs)>? systems,
+            out (string Name, double TotalMs) value)
+        {
+            value = default;
+            if (systems == null || systems.Count == 0) return false;
+
+            for (int i = 0; i < systems.Count; i++)
+            {
+                var entry = systems[i];
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                if (entry.Name.StartsWith(PROFILER_MOD_NAME, StringComparison.Ordinal)) continue;
+                value = entry;
+                return true;
+            }
+
+            value = systems[0];
+            return !string.IsNullOrEmpty(value.Name);
         }
 
         private static void AppendSystemInfo(StringBuilder sb)
@@ -149,7 +263,7 @@ namespace VanillaProfiler.Output
             sb.AppendLine($"Memory:           {health.MemoryLevel}  ({health.MemoryHint})");
             sb.AppendLine($"Growth:           {health.GrowthLevel}");
             sb.AppendLine($"Overall:          {health.Overall}");
-            sb.AppendLine($"Bottleneck:       {health.Bottleneck} — {health.BottleneckHint}");
+            sb.AppendLine($"Bottleneck:       {BottleneckText(health)} — {health.BottleneckHint}");
             sb.AppendLine();
         }
 
@@ -271,20 +385,30 @@ namespace VanillaProfiler.Output
 
         private static string DeltaStr(double mb) => mb >= 0 ? Inv($"+{mb:F1} MB") : Inv($"{mb:F1} MB");
 
+        private static string BottleneckText(HealthReport health)
+        {
+            return health.RenderCause == RenderCause.None
+                ? health.Bottleneck.ToString()
+                : $"{health.Bottleneck}/{health.RenderCause}";
+        }
+
         private static string Counter(double value, bool available, string unit)
             => available ? Inv($"{value:F2} {unit}") : "unavailable";
 
-        private static void WriteSupportBundle(string reportPath, string report)
+        private static SupportBundleResult WriteSupportBundle(string reportPath, string report)
         {
-            try
+            var result = SupportBundleWriter.Write(reportPath, report);
+            if (result.ZipPath != null)
             {
-                string zipPath = SupportBundleWriter.Write(reportPath, report);
-                ModLog.Info($"Support bundle saved: {zipPath}");
+                ModLog.Info($"Support bundle saved: {result.ZipPath}");
             }
-            catch (Exception ex)
+            if (result.Warnings.Count > 0)
             {
-                ModLog.Warn($"Support bundle export failed: {ex.Message}");
+                ModLog.Warn($"Support bundle created with warnings: {string.Join("; ", result.Warnings)}");
             }
+            if (result.Error != null)
+                ModLog.Warn($"Support bundle export failed: {result.Error}");
+            return result;
         }
 
         private static string WindowLabel(OverlaySnapshot? snap)

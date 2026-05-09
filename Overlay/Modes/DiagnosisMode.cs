@@ -59,7 +59,8 @@ namespace VanillaProfiler.Overlay.Modes
 
             return health.Bottleneck switch
             {
-                BottleneckKind.RenderBound => "graphics/rendering is overloaded",
+                BottleneckKind.GpuBound => "GPU/present wait is overloaded",
+                BottleneckKind.CpuRenderBound => "CPU rendering is overloaded",
                 BottleneckKind.SimBound => "simulation is overloaded",
                 BottleneckKind.MemoryBound => "managed memory is growing fast",
                 BottleneckKind.Balanced => "performance is unstable",
@@ -79,15 +80,22 @@ namespace VanillaProfiler.Overlay.Modes
             if (health.Bottleneck == BottleneckKind.SimBound)
                 return new[] { "The simulation is taking most of the frame.", "This can be a large city or a heavy gameplay mod." };
 
-            if (health.Bottleneck == BottleneckKind.RenderBound)
+            if (health.Bottleneck == BottleneckKind.GpuBound)
+                return new[]
+                {
+                    "The CPU is waiting on the GPU present path.",
+                    "Lower GPU-heavy graphics settings first.",
+                };
+
+            if (health.Bottleneck == BottleneckKind.CpuRenderBound)
             {
-                if (health.RenderSeverity == RenderBoundSeverity.Severe)
+                if (health.RenderCause == RenderCause.GpuUnderutilizedByCpuRender)
                     return new[]
                     {
                         $"CPU rendering is very heavy ({health.RenderPhaseMs:F0} ms/frame).",
-                        "Multiple signals point to a CPU-side render lock.",
+                        "The GPU is being starved by CPU render/driver latency.",
                     };
-                return new[] { "Rendering is taking most of the frame.", "Lower graphics settings may help." };
+                return new[] { "CPU render submission is taking most of the frame.", "Draw calls, LOD and shadows are likely contributors." };
             }
 
             if (health.StutterLevel == HealthLevel.Poor)
@@ -101,9 +109,17 @@ namespace VanillaProfiler.Overlay.Modes
             if (health.Overall == HealthLevel.Good)
                 return new[] { "1. Keep playing normally.", "2. Press Ctrl+F11 only if someone asks for a report." };
 
-            if (health.Bottleneck == BottleneckKind.RenderBound)
+            if (health.Bottleneck == BottleneckKind.GpuBound)
+                return new[]
+                {
+                    "1. Lower GPU-heavy settings first.",
+                    "2. Re-check FPS and present wait after each change.",
+                    "3. Do not change Max Frame Latency for this case.",
+                };
+
+            if (health.Bottleneck == BottleneckKind.CpuRenderBound)
             {
-                if (health.RenderSeverity == RenderBoundSeverity.Severe)
+                if (health.RenderSeverity == RenderSeverityLevel.Severe)
                     return new[]
                     {
                         "1. Open the Recommendations screen (next mode).",

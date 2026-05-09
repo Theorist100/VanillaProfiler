@@ -30,7 +30,6 @@ namespace VanillaProfiler
         private const double SPIKE_30FPS_MS = 1000.0 / 30.0;
         private const double SPIKE_20FPS_MS = 1000.0 / 20.0;
 
-        private readonly Func<ProfilerSettingsSnapshot> m_Settings = () => SettingsStore.Snapshot;
         private readonly MetricsAggregator m_Metrics;
         private readonly MemorySampler m_Memory = new();
         private readonly ReportBuilder m_Builder = new();
@@ -39,12 +38,11 @@ namespace VanillaProfiler
         private readonly SpikeScreenshot m_SpikeScreenshots = new();
         private readonly GraphicsSettingsProbe m_GraphicsSettings = new();
         private readonly ProfilerSessionState m_Session = new();
-        private SystemReplacementDetector.ReplacementSnapshot m_Replacements =
-            SystemReplacementDetector.ReplacementSnapshot.Empty;
+        private ReportWindowContext m_CurrentWindowContext = ReportWindowContext.Empty;
 
         // Frame timing — main thread only
+        private long m_NextWindowId;
         private int m_ReportCount;
-        private bool m_HarmonyScanned;
         private bool m_ReplacementsLogged;
 
         // Defensive stale-reference guard for callbacks after OnDispose.
@@ -63,9 +61,9 @@ namespace VanillaProfiler
         public bool IsGameLoaded => m_Session.IsGameLoaded;
         public bool IsLoading => m_Session.IsLoading;
         public bool IsSettling => m_Session.IsSettling;
-        public bool ShouldProfileVanillaSystems => m_Settings().Settings.ProfileVanillaSystems;
+        public bool ShouldProfileVanillaSystems => CurrentWindowContext.Settings.Settings.ProfileVanillaSystems;
         public bool IsVanillaSystemPatched(Type type)
-            => Volatile.Read(ref m_Replacements).IsPatched(type);
+            => CurrentWindowContext.Replacements.IsPatched(type);
 
         public string FpsSparklineText(int width) => FpsSparkline.Render(width);
 
@@ -88,12 +86,15 @@ namespace VanillaProfiler
             m_GraphicsSettings.Invalidate();
         }
 
-        private float ReportInterval => m_Settings().Settings.ReportIntervalSec;
+        private ReportWindowContext CurrentWindowContext => Volatile.Read(ref m_CurrentWindowContext);
+        private float ReportInterval => CurrentWindowContext.Settings.Settings.ReportIntervalSec;
 
         public Profiler(IReportSink[] sinks)
         {
-            m_Metrics = new MetricsAggregator(m_Settings);
-            MemoryHistory = new MemoryHistory(m_Settings);
+            var initialContext = CreateNextWindowContext();
+            Volatile.Write(ref m_CurrentWindowContext, initialContext);
+            m_Metrics = new MetricsAggregator(initialContext);
+            MemoryHistory = new MemoryHistory(() => CurrentWindowContext.Settings);
             Recommendations = new RecommendationEngine(m_GraphicsSettings);
             m_Dispatcher = new ReportDispatcher(sinks);
             m_Scheduler.Reset();
@@ -104,7 +105,6 @@ namespace VanillaProfiler
         {
             m_Disposed = true;
             m_Dispatcher.Shutdown();
-            ResetForBoundary(SessionBoundary.Dispose);
             m_Memory.Dispose();
         }
 
@@ -112,42 +112,21 @@ namespace VanillaProfiler
         {
             MainThreadGuard.AssertMainThread(nameof(InitializeFromCurrentMode));
             if (m_Disposed) return;
-            if (!m_Session.Initialize(current)) return;
-
-            ResetForBoundary(m_Session.IsSettling
-                ? SessionBoundary.GameLoaded
-                : SessionBoundary.GameUnloaded);
-            RefreshReplacementSnapshot();
-            if (m_Session.IsSettling)
-                PrepareLoadedGameSession();
+            ApplyLifecycleTransition(m_Session.Initialize(current));
         }
 
         public void SetGameLoaded(bool gameLoaded)
         {
             MainThreadGuard.AssertMainThread(nameof(SetGameLoaded));
             if (m_Disposed) return;
-
-            if (!m_Session.SetGameLoaded(gameLoaded)) return;
-
-            ResetForBoundary(gameLoaded ? SessionBoundary.GameLoaded : SessionBoundary.GameUnloaded);
-            RefreshReplacementSnapshot();
-            if (m_Session.IsSettling)
-                PrepareLoadedGameSession();
+            ApplyLifecycleTransition(m_Session.SetGameLoaded(gameLoaded));
         }
 
         public void BeginLoading(bool loadsCity)
         {
             MainThreadGuard.AssertMainThread(nameof(BeginLoading));
             if (m_Disposed) return;
-            if (!loadsCity)
-            {
-                SetGameLoaded(false);
-                return;
-            }
-
-            if (!m_Session.BeginLoading()) return;
-            ResetForBoundary(SessionBoundary.BeginLoading);
-            RefreshReplacementSnapshot();
+            ApplyLifecycleTransition(m_Session.BeginLoading(loadsCity));
         }
 
         // ---------- Hot-path recording ----------
@@ -171,8 +150,8 @@ namespace VanillaProfiler
         /// <summary>
         /// Main thread (SystemBase.Update Harmony Postfix). Routes a vanilla
         /// system whose OnUpdate is currently patched by a foreign Harmony
-        /// prefix to the dedicated bucket — the elapsed time blends mod
-        /// prefix and (possibly skipped) vanilla original, which is honest
+        /// patch to the dedicated bucket — the elapsed time blends mod
+        /// patch and vanilla original work, which is honest
         /// total cost but not attributable to either side.
         /// </summary>
         public void RecordPatchedVanilla(string name, long selfTicks, long inclusiveTicks)
@@ -203,7 +182,7 @@ namespace VanillaProfiler
             m_Metrics.RecordFrame(timing.DeltaTicks, timing.FrameMs, SPIKE_30FPS_MS, SPIKE_20FPS_MS);
             FpsSparkline.OnFrame(timing.FrameMs, timing.FrameSec);
             if (IsGameLoaded)
-                m_SpikeScreenshots.OnFrame(timing.FrameMs, m_Settings());
+                m_SpikeScreenshots.OnFrame(timing.FrameMs, CurrentWindowContext.Settings);
 
             if (reportDue)
                 Report(now);
@@ -225,51 +204,51 @@ namespace VanillaProfiler
             if (m_Disposed) return;
 
             float elapsedSec = m_Scheduler.ConsumeElapsedSeconds(nowTicks, ReportInterval);
-
-            if (!IsGameLoaded)
+            try
             {
-                RefreshReplacementSnapshot();
-                m_Memory.Sample(elapsedSec);
-                using (m_Metrics.Drain()) { }
-                return;
-            }
-
-            var replacements = RefreshReplacementSnapshot();
-
-            // Deferred Harmony scan once other mods finish patching
-            if (!m_HarmonyScanned)
-            {
-                m_HarmonyScanned = true;
-                HarmonyConflictDetector.ScanAndLog(this);
-            }
-
-            using (var lease = m_Metrics.Drain())
-            {
-                var metrics = lease.Sample;
-                metrics.ElapsedSec = elapsedSec;
-                if (metrics.FrameCount == 0)
+                if (!IsGameLoaded)
                 {
-                    LogInfo("Skipped empty report (no frames collected).");
+                    m_Memory.Sample(elapsedSec);
+                    using (m_Metrics.Drain()) { }
                     return;
                 }
 
-                m_ReportCount++;
-                var memory = m_Memory.Sample(elapsedSec);
-                MemoryHistory.Record(memory.ManagedBytes, elapsedSec);
+                // Deferred Harmony scan; detector owns freshness and logs only on changes.
+                HarmonyConflictDetector.LogIfChanged(this);
 
-                var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
-                AttachReplacementSnapshot(snapshot, metrics, replacements);
-                PublishSnapshot(snapshot, health);
-                WriteReports(metrics, memory, snapshot, health);
+                using (var lease = m_Metrics.Drain())
+                {
+                    var metrics = lease.Sample;
+                    metrics.ElapsedSec = elapsedSec;
+                    if (metrics.FrameCount == 0)
+                    {
+                        LogInfo("Skipped empty report (no frames collected).");
+                        return;
+                    }
+
+                    m_ReportCount++;
+                    var memory = m_Memory.Sample(elapsedSec);
+                    MemoryHistory.Record(memory.ManagedBytes, elapsedSec);
+
+                    var (snapshot, health) = m_Builder.Build(metrics, memory, MemoryHistory);
+                    AttachReplacementSnapshot(snapshot, metrics);
+                    PublishSnapshot(snapshot, health);
+                    WriteReports(metrics, memory, snapshot, health);
+                }
+            }
+            finally
+            {
+                if (!m_Disposed)
+                    BeginNextWindow();
             }
         }
 
         private void AttachReplacementSnapshot(
             OverlaySnapshot snapshot,
-            MetricsSample metrics,
-            SystemReplacementDetector.ReplacementSnapshot replacements)
+            MetricsSample metrics)
         {
-            snapshot.ReplacedVanillaSystems = ToTuples(replacements, metrics.PatchedVanillaSystems);
+            var replacements = metrics.WindowContext.Replacements;
+            snapshot.ReplacedVanillaSystems = ToReplacementRows(replacements, metrics.PatchedVanillaSystems);
             if (m_ReplacementsLogged) return;
             m_ReplacementsLogged = true;
             SystemReplacementDetector.LogTo(this, replacements);
@@ -301,25 +280,45 @@ namespace VanillaProfiler
             m_Dispatcher.WriteSystem(level, msg);
         }
 
-        private static (string, string, double)[] ToTuples(
+        private static ReplacedVanillaSystemRow[] ToReplacementRows(
             SystemReplacementDetector.ReplacementSnapshot snapshot,
             System.Collections.Generic.IReadOnlyDictionary<string, Aggregation.PhaseData>? patchedMs)
         {
             var list = snapshot.Replacements;
-            if (list == null || list.Count == 0) return Array.Empty<(string, string, double)>();
-            var arr = new (string, string, double)[list.Count];
+            if (list == null || list.Count == 0) return Array.Empty<ReplacedVanillaSystemRow>();
+            var arr = new ReplacedVanillaSystemRow[list.Count];
             for (int i = 0; i < list.Count; i++)
             {
                 var r = list[i];
                 double ms = 0.0;
                 if (patchedMs != null && patchedMs.TryGetValue(r.VanillaSystem, out var phase))
                     ms = phase.InclusiveTicks * 1000.0 / Stopwatch.Frequency;
-                arr[i] = (r.VanillaSystem, r.OwnerMod, ms);
+                arr[i] = new ReplacedVanillaSystemRow(r.VanillaSystem, r.Owners, ms);
             }
             return arr;
         }
 
-        private void ResetForBoundary(SessionBoundary kind)
+        private void ApplyLifecycleTransition(ProfilerLifecycleTransition transition)
+        {
+            if (transition.IsDuplicate) return;
+
+            if (transition.IsSyntheticLoadStart)
+            {
+                LogInfo(
+                    "Synthetic load lifecycle transition: " +
+                    $"previous={transition.PreviousState} " +
+                    $"session={transition.Token.SessionId} " +
+                    $"load={transition.Token.LoadId}");
+            }
+
+            if (!transition.Boundary.HasValue) return;
+
+            ApplySessionBoundary(transition.Boundary.Value);
+            if (transition.Boundary.Value == SessionBoundary.GameLoaded)
+                PrepareLoadedGameSession();
+        }
+
+        private void ApplySessionBoundary(SessionBoundary kind)
         {
             m_Metrics.Reset();
             m_Memory.ResetSession();
@@ -327,21 +326,19 @@ namespace VanillaProfiler
             FpsSparkline.Reset();
             m_SpikeScreenshots.Reset();
             m_GraphicsSettings.Invalidate();
-            Volatile.Write(ref m_Replacements, SystemReplacementDetector.ReplacementSnapshot.Empty);
             SystemReplacementDetector.Reset();
             switch (kind)
             {
-                case SessionBoundary.Dispose:
                 case SessionBoundary.BeginLoading:
                 case SessionBoundary.GameLoaded:
                 case SessionBoundary.GameUnloaded:
                     CityContext.Reset();
                     break;
             }
-            m_HarmonyScanned = false;
             m_ReplacementsLogged = false;
             m_Scheduler.Reset();
             m_Session.ClearReadState();
+            BeginNextWindow();
         }
 
         private void PrepareLoadedGameSession()
@@ -349,11 +346,22 @@ namespace VanillaProfiler
             MemoryHistory.SuppressNextReports(5);
         }
 
-        private SystemReplacementDetector.ReplacementSnapshot RefreshReplacementSnapshot()
+        private void BeginNextWindow()
         {
-            var snapshot = SystemReplacementDetector.Scan();
-            Volatile.Write(ref m_Replacements, snapshot);
-            return snapshot;
+            var context = m_Disposed ? ReportWindowContext.Empty : CreateNextWindowContext();
+            m_Metrics.StartWindow(context);
+            Volatile.Write(ref m_CurrentWindowContext, context);
+        }
+
+        private ReportWindowContext CreateNextWindowContext()
+        {
+            var replacements = IsGameLoaded
+                ? SystemReplacementDetector.Scan()
+                : SystemReplacementDetector.ReplacementSnapshot.Empty;
+            return new ReportWindowContext(
+                ++m_NextWindowId,
+                replacements,
+                SettingsStore.Snapshot);
         }
 
     }

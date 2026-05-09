@@ -15,7 +15,7 @@ namespace VanillaProfiler.Diagnostics
             int defaultMode = 0,
             int anchor = 0,
             int sparklineWidth = 60,
-            bool spikeScreenshots = true,
+            bool spikeScreenshots = false,
             float spikeThresholdMs = 100.0f,
             float syncPointThresholdMs = 0.5f,
             bool settingsPanelHotkey = true,

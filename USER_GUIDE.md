@@ -16,7 +16,7 @@ All shortcuts use **Ctrl + F-key** so they don't collide with vanilla Cities: Sk
 
 | Key | Action |
 |---|---|
-| **Ctrl+F7** | Toggle spike screenshots (auto-capture on frames over threshold) |
+| **Ctrl+F7** | Toggle spike screenshots (off by default; captures frames over threshold when enabled) |
 | **Ctrl+F8** | Open / close settings panel |
 | **Ctrl+F9** | Cycle overlay mode: Status → Diagnosis → Tips → Details → Engine → Hide |
 | **Ctrl+F10** | Force an immediate report dump to `VanillaProfiler.log` |
@@ -138,7 +138,8 @@ A red **MEMORY** with a `LEAK SUSPECTED: +120 MB over 30s` hint means managed me
 | Verdict | Meaning | What to try |
 |---|---|---|
 | **Balanced** | No single subsystem dominates the frame | Nothing |
-| **RenderBound** | GPU/render phase > 60 % of frame | Lower graphics settings (volumetrics, shadow distance, anti-aliasing) |
+| **GpuBound** | GPU / present wait is dominating the frame | Lower graphics settings (volumetrics, shadows, anti-aliasing) |
+| **CpuRenderBound** | CPU render thread or render submission is dominating the frame | Reduce render-heavy scene/settings load; check Engine counters such as DrawCalls and SetPass |
 | **SimBound** | Sim phase > 60 % of frame | City is large or a mod is heavy — check **Top Mods** |
 | **MemoryBound** | Managed memory growth > 10 MB/s | Restart the game; report which mod is heaviest |
 
@@ -165,7 +166,7 @@ If the issue is repeated stutter (not just "feels slow"), enable **Ctrl+F7 spike
 |---|---|---|
 | Report interval | 5 s | How often `VanillaProfiler.log` gets a new entry |
 | Sparkline width | 60 | Number of seconds shown in the FPS sparkline |
-| Spike screenshots | on | Auto-capture on frame > threshold |
+| Spike screenshots | off | Auto-capture on frame > threshold when enabled |
 | Profile vanilla systems | off | Patches every vanilla `Update`; adds measurable overhead |
 | Show hint pill in Hide mode | on | Off = fully clean screen in Hide; entering Hide flashes a 3 s toast |
 | Spike threshold | 100 ms | Lower = more captures (with 30 s cooldown) |

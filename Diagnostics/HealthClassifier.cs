@@ -15,15 +15,24 @@ namespace VanillaProfiler.Diagnostics
     {
         Unknown = 0,
         Balanced,
-        RenderBound,
+        GpuBound,
+        CpuRenderBound,
         SimBound,
         MemoryBound,
     }
 
-    /// <summary>Confidence that the render phase is the bottleneck. Drives advice depth.</summary>
-    public enum RenderBoundSeverity
+    public enum RenderCause
     {
-        None = 0,    // not render-bound, or signal too weak to act on
+        None = 0,
+        PresentWait,
+        CpuRenderSubmission,
+        GpuUnderutilizedByCpuRender,
+    }
+
+    /// <summary>Confidence that a render-related bottleneck is actionable. Drives advice depth.</summary>
+    public enum RenderSeverityLevel
+    {
+        None = 0,    // no render cause, or signal too weak to act on
         Mild,        // render is heavier than sim but within normal range
         Severe,      // multiple signals point to a CPU-side render lock
     }
@@ -47,21 +56,22 @@ namespace VanillaProfiler.Diagnostics
         // pick how detailed the advice should be.
         public double RenderPhaseMs;
         public double SimPhaseMs;
+        public RenderCause RenderCause;
 
-        // Multi-signal score for render-bound severity. Computed only when the
-        // bottleneck is RenderBound; higher value unlocks more specific advice.
-        public RenderBoundSeverity RenderSeverity;
+        // Multi-signal score for render-related severity. Computed only when the
+        // bottleneck is render-related; higher value unlocks more specific advice.
+        public RenderSeverityLevel RenderSeverity;
 
         // Number of signals that fired ("render heavy", "sim quiet", "stutter pattern",
         // "vanilla-render-system in top"). Exposed for the support file so triagers
         // see the breakdown, not just the verdict.
         public int RenderSignalScore;
 
-        // Direct CPU/GPU bound classification when ProfilerRecorder data is present.
-        // GpuBoundPercent ≈ how much of the frame the GPU is the gating thread.
-        // 0 when no GPU data is available (RenderBound score still works without).
-        public double GpuBoundPercent;
-        public bool GpuUnderutilized;     // CPU render >> GPU → classic pre-rendered frames symptom
+        // Direct CPU/GPU classification when ProfilerRecorder data is present.
+        // GpuBusyPercent ≈ how much of the frame the GPU was busy. It is descriptive
+        // only; present-wait is the true GPU-bound signal.
+        public double GpuBusyPercent;
+        public bool GpuUnderutilizedByCpuRender;     // CPU render >> GPU → classic pre-rendered frames symptom
     }
 
     public static class HealthClassifier
@@ -102,16 +112,15 @@ namespace VanillaProfiler.Diagnostics
             // GPU + CPU thread numbers. Otherwise the legacy phase-only path runs.
             ClassifyThreadBalance(snap, report);
 
-            (report.Bottleneck, report.BottleneckHint) = ClassifyBottleneck(
-                snap.AvgFrameMs, simPhaseMs, renderPhaseMs, snap.PresentWaitMs,
-                snap.ManagedGrowthMBperSec, report);
+            (report.Bottleneck, report.RenderCause, report.BottleneckHint) = ClassifyBottleneck(
+                snap, simPhaseMs, renderPhaseMs, report);
 
-            if (report.Bottleneck == BottleneckKind.RenderBound)
+            if (report.RenderCause != RenderCause.None)
             {
-                int score = ScoreRenderBoundSignals(snap, simPhaseMs, renderPhaseMs, report);
+                int score = ScoreRenderSignals(snap, simPhaseMs, renderPhaseMs, report);
                 report.RenderSignalScore = score;
-                if (score >= RENDER_SEVERE_SCORE) report.RenderSeverity = RenderBoundSeverity.Severe;
-                else if (score >= RENDER_MILD_SCORE) report.RenderSeverity = RenderBoundSeverity.Mild;
+                if (score >= RENDER_SEVERE_SCORE) report.RenderSeverity = RenderSeverityLevel.Severe;
+                else if (score >= RENDER_MILD_SCORE) report.RenderSeverity = RenderSeverityLevel.Mild;
             }
 
             return report;
@@ -130,11 +139,12 @@ namespace VanillaProfiler.Diagnostics
             double frameMs = snap.AvgFrameMs;
             if (gpu <= 0 || frameMs <= 0) return;
 
-            report.GpuBoundPercent = Math.Min(100.0, gpu / frameMs * 100.0);
+            report.GpuBusyPercent = Math.Min(100.0, gpu / frameMs * 100.0);
 
             // Underutilization: CPU render thread is doing more work than the GPU
             // takes to consume it, with a meaningful gap. Strong driver-bound signal.
-            report.GpuUnderutilized = cpuRender > gpu + THREAD_GAP_MS && (cpuMain <= 0 || cpuMain >= gpu);
+            bool mainCompatible = cpuMain <= 0 || cpuMain >= gpu;
+            report.GpuUnderutilizedByCpuRender = cpuRender > gpu + THREAD_GAP_MS && mainCompatible;
         }
 
         // Multi-signal score for "this looks like a CPU-side rendering bottleneck".
@@ -149,7 +159,7 @@ namespace VanillaProfiler.Diagnostics
         private const int RENDER_SEVERE_SCORE = 3;
         private const int RENDER_MILD_SCORE = 2;
 
-        private static int ScoreRenderBoundSignals(OverlaySnapshot snap, double simMs, double renderMs, HealthReport report)
+        private static int ScoreRenderSignals(OverlaySnapshot snap, double simMs, double renderMs, HealthReport report)
         {
             int score = 0;
             double frameMs = snap.AvgFrameMs;
@@ -178,7 +188,7 @@ namespace VanillaProfiler.Diagnostics
             // 6) Direct GPU underutilization signal (only when ProfilerRecorder gave
             //    us the GPU number). This is the gold-standard pre-rendered-frames
             //    detector and worth two points on its own.
-            if (report.GpuUnderutilized) score += 2;
+            if (report.GpuUnderutilizedByCpuRender) score += 2;
 
             return score;
         }
@@ -217,7 +227,7 @@ namespace VanillaProfiler.Diagnostics
 
             double spikesPer5s = spikes30 * 5.0 / window;
             bool hasPattern = spikesPer5s >= SPIKES_OK;
-            if (spikesPer5s > SPIKES_POOR) return HealthLevel.Poor;
+            if (spikesPer5s >= SPIKES_POOR) return HealthLevel.Poor;
             if (hasPattern && maxFrameMs >= FRAME_POOR_MS) return HealthLevel.Poor;
             if (hasPattern || maxFrameMs >= FRAME_GOOD_MS) return HealthLevel.Ok;
             return HealthLevel.Good;
@@ -266,68 +276,73 @@ namespace VanillaProfiler.Diagnostics
         private const double BOTTLENECK_FRAME_SHARE = 0.6;
         private const double MEMORY_BOUND_MB_PER_S = 10.0;
 
-        private static (BottleneckKind, string) ClassifyBottleneck(
-            double frameMs, double simMs, double renderMs, double presentWaitMs,
-            double managedGrowthMBperSec, HealthReport report)
+        private static (BottleneckKind, RenderCause, string) ClassifyBottleneck(
+            OverlaySnapshot snap, double simMs, double renderMs, HealthReport report)
         {
-            if (Math.Max(0, managedGrowthMBperSec) > MEMORY_BOUND_MB_PER_S)
-                return (BottleneckKind.MemoryBound, "Managed memory growing fast — restart recommended");
+            if (Math.Max(0, snap.ManagedGrowthMBperSec) > MEMORY_BOUND_MB_PER_S)
+                return (BottleneckKind.MemoryBound, RenderCause.None, "Managed memory growing fast — restart recommended");
 
+            double frameMs = snap.AvgFrameMs;
             if (frameMs <= 0)
-                return (BottleneckKind.Balanced, "Collecting data...");
+                return (BottleneckKind.Balanced, RenderCause.None, "Collecting data...");
 
             double simShareDenom = simMs / frameMs;
             double renderShare = renderMs / frameMs;
             // PresentWait > 30% of frame is the real GPU-bound signal: CPU main thread
-            // sitting idle waiting on the swapchain. GpuBoundPercent (gpu/frameMs) only
+            // sitting idle waiting on the swapchain. GpuBusyPercent (gpu/frameMs) only
             // tells you what fraction of the frame the GPU was busy — at 98% with a 0.05ms
             // PresentWait, CPU and GPU are pipelined nicely and "lower graphics quality"
             // is the wrong advice. CS2 release exposes Gfx.WaitForPresentOnGfxThread
             // (verified in MarkerEnumerator dump) so this signal is always available.
-            double presentShare = presentWaitMs / frameMs;
+            double presentShare = snap.PresentWaitMs / frameMs;
             const double GPU_BOUND_PRESENT_SHARE = 0.30;
 
             // Direct path: ProfilerRecorder gave us GPU + CPU thread numbers, so
             // we can name the actual gating thread instead of guessing from phases.
-            if (report.GpuBoundPercent > 0)
-            {
-                if (report.GpuUnderutilized)
-                    return (BottleneckKind.RenderBound,
-                        $"CPU render is gating GPU ({report.GpuBoundPercent:F0}% GPU active) — driver-side stall");
-
-                // True GPU-bound: CPU stalls measurably on present. Lowering graphics
-                // quality is the right advice here.
-                if (presentShare > GPU_BOUND_PRESENT_SHARE)
-                    return (BottleneckKind.RenderBound,
-                        $"GPU bound — CPU waits {presentShare * 100:F0}% of frame. Lower graphics quality.");
-
-                if (simShareDenom > BOTTLENECK_FRAME_SHARE)
-                    return (BottleneckKind.SimBound, "Simulation heavy — large city or heavy mod");
-
-                // Phase-based render check still matters when GPU is light: a heavy CPU
-                // render-submission phase (many draw calls, driver overhead) shows up here
-                // even though PresentWait stays low.
-                if (renderShare > BOTTLENECK_FRAME_SHARE && renderShare > simShareDenom)
-                    return (BottleneckKind.RenderBound, "Render submission heavy — many draw calls or driver overhead");
-
-                // High GPU activity (>70% frame) but CPU not waiting on swapchain — the
-                // pipeline is well-balanced, not actually gated. Don't shout "GPU bound";
-                // tell the player we're CPU-paced even though the GPU is busy.
-                if (report.GpuBoundPercent > 70)
-                    return (BottleneckKind.Balanced,
-                        $"GPU {report.GpuBoundPercent:F0}% busy, no CPU stall — CPU-paced");
-
-                return (BottleneckKind.Balanced, "Frame budget balanced");
-            }
+            if (report.GpuBusyPercent > 0)
+                return ClassifyWithThreadCounters(
+                    snap, report, simShareDenom, renderShare, presentShare, GPU_BOUND_PRESENT_SHARE);
 
             // Legacy path: only phase data available. Same logic as before.
             if (renderShare > BOTTLENECK_FRAME_SHARE && renderShare > simShareDenom)
-                return (BottleneckKind.RenderBound, "GPU/render bound — try lowering graphics");
+                return (BottleneckKind.CpuRenderBound, RenderCause.CpuRenderSubmission,
+                    "Render submission heavy — try lowering graphics and draw distance");
 
             if (simShareDenom > BOTTLENECK_FRAME_SHARE)
-                return (BottleneckKind.SimBound, "Simulation heavy — large city or heavy mod");
+                return (BottleneckKind.SimBound, RenderCause.None, "Simulation heavy — large city or heavy mod");
 
-            return (BottleneckKind.Balanced, "Frame budget balanced");
+            return (BottleneckKind.Balanced, RenderCause.None, "Frame budget balanced");
+        }
+
+        private static (BottleneckKind, RenderCause, string) ClassifyWithThreadCounters(
+            OverlaySnapshot snap,
+            HealthReport report,
+            double simShare,
+            double renderShare,
+            double presentShare,
+            double gpuBoundPresentShare)
+        {
+            // True GPU-bound: CPU stalls measurably on present.
+            if (snap.PresentWaitAvailable && presentShare > gpuBoundPresentShare)
+                return (BottleneckKind.GpuBound, RenderCause.PresentWait,
+                    $"GPU bound — CPU waits {presentShare * 100:F0}% of frame. Lower graphics quality.");
+
+            if (report.GpuUnderutilizedByCpuRender)
+                return (BottleneckKind.CpuRenderBound, RenderCause.GpuUnderutilizedByCpuRender,
+                    $"CPU render is gating GPU ({report.GpuBusyPercent:F0}% GPU active) — driver-side stall");
+
+            if (simShare > BOTTLENECK_FRAME_SHARE)
+                return (BottleneckKind.SimBound, RenderCause.None, "Simulation heavy — large city or heavy mod");
+
+            if (renderShare > BOTTLENECK_FRAME_SHARE && renderShare > simShare)
+                return (BottleneckKind.CpuRenderBound, RenderCause.CpuRenderSubmission,
+                    "CPU render submission heavy — many draw calls or driver overhead");
+
+            if (report.GpuBusyPercent > 70)
+                return (BottleneckKind.Balanced, RenderCause.None,
+                    $"GPU {report.GpuBusyPercent:F0}% busy, no CPU stall — CPU-paced");
+
+            return (BottleneckKind.Balanced, RenderCause.None, "Frame budget balanced");
         }
 
         private static string Inv(FormattableString value) => FormattableString.Invariant(value);

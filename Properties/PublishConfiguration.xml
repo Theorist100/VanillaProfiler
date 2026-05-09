@@ -12,8 +12,8 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one install — a traff
 - **Status screen** — Good / Warning / Problem with the likely cause and one-line advice
 - **Diagnosis screen** — plain-language explanation when something is wrong
 - **Memory leak detector** — flags sustained managed-heap growth
-- **Bottleneck verdict** — RenderBound / SimBound / MemoryBound / Balanced with concrete next step
-- **Auto-screenshots on stutters** — frames over 100 ms get captured to disk
+- **Bottleneck verdict** — GpuBound / CpuRenderBound / SimBound / MemoryBound / Balanced with concrete next step
+- **Optional spike screenshots** — enable with Ctrl+F7 to capture frames over 100 ms to disk
 - **Ctrl+F11 support file** — one-click bundle (system info, mods, stats, log tail) to send to mod authors
 
 ### For mod authors and power users
@@ -22,10 +22,10 @@ Diagnostic mod for Cities: Skylines II. Two audiences in one install — a traff
 - **Sync-point flagging** — Update() calls above the threshold (default 0.5 ms, tunable) tagged "[likely sync point]" in the log; per-system suspect-call counter
 - **ECB.Playback timing** — Harmony hook on EntityCommandBuffer.Playback surfaces structural-change cost separately from system Update time
 - **GPU/CPU thread breakdown** — Unity ProfilerRecorder for CPU Main / CPU Render / GPU Frame Time (real hardware numbers, not driver-reported)
-- **Full 5-second PERF reports** in VanillaProfiler.log — phase tables, top vanilla and mod systems by self main-thread time, inclusive Update context, ECB cost, memory deltas
+- **Full 5-second report sections** in VanillaProfiler.log — phase tables, top vanilla and mod systems by self main-thread time, inclusive Update context, ECB cost, memory deltas
 - **Memory metrics** — managed (GC), Mono heap, native alloc/reserved, GPU driver memory, growth rate per second, baseline delta
-- **Harmony conflict detector** — lists methods patched by more than one mod
-- **Patched-vanilla detector** — when a mod prefixes a vanilla OnUpdate, surfaces the row "Game.X.YSystem N.N ms ← ModName". Total Update ms is measured unconditionally (independent of the "Profile vanilla systems" toggle); the elapsed time blends the patching mod's prefix with the vanilla original because Harmony does not let us split them, but the total is honest. Listed per cycle in the overlay, the PERF.log report tables, and the Ctrl+F11 export.
+- **Harmony conflict detector** — lists multi-owner Harmony patches only when VanillaProfiler is one of the owners
+- **Patched-vanilla detector** — when a mod prefixes a vanilla OnUpdate, surfaces the row "Game.X.YSystem N.N ms ← ModName". Total Update ms is measured unconditionally (independent of the "Profile vanilla systems" toggle); the elapsed time blends the patching mod's prefix with the vanilla original because Harmony does not let us split them, but the total is honest. Listed per cycle in the overlay, VanillaProfiler.log report tables, and the Ctrl+F11 export.
 
 ### Scope of measurement (read this)
 
@@ -46,6 +46,7 @@ Frame time, GPU frame time, CPU main/render thread time, all memory metrics, fra
 
 - Continuous log: `Logs/VanillaProfiler.log`
 - Diagnostic reports: `Reports/CSII_Report_*.txt`
+- Support bundles: `Reports/CSII_Report_*.zip`
 - Spike screenshots: `Logs/spikes/spike_*.png`
 - Settings: `VanillaProfiler/settings.json`
 
@@ -64,8 +65,8 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
 ### How to share a bug report
 
 1. Press **Ctrl+F11** while the lag is happening
-2. Find `CSII_Report_*.txt` in your Reports folder
-3. Attach it to your bug report — it includes system info, loaded mods, the latest report window, top mods, and the last 50 lines of the perf log</LongDescription>
+2. Find `CSII_Report_*.zip` and `CSII_Report_*.txt` in your Reports folder
+3. Attach the `.zip` when possible, otherwise attach the `.txt` — it includes system info, loaded mods, current settings, the latest report window, top mods, and the last 50 lines of VanillaProfiler.log</LongDescription>
   <Thumbnail Value="Properties/thumbnail.png" />
   <ModVersion Value="1.5.4" />
   <GameVersion Value="*" />
@@ -73,10 +74,11 @@ Adds approximately **15 microseconds per frame** from Stopwatch instrumentation 
   <Tag Value="Code Mod" />
   <ChangeLog>Top Mods and Top Systems now report self/exclusive main-thread cost, so nested SystemBase.Update calls are no longer double-counted. Numbers can be lower than previous releases; that is expected and more mathematically correct.
 VanillaProfiler.log now shows SELF and INCL columns for system tables. Patched-vanilla rows still use total Update ms because the prefix/original split is not measurable.
+Ctrl+F11 now writes both CSII_Report_*.txt and a bounded CSII_Report_*.zip support bundle with settings and log context.
 Replacement detection now uses a deduplicated per-Type snapshot refreshed at lifecycle boundaries and at the start of each report window, so patched-vanilla routing and report output read the same state.
-Overlay read access now exposes DTOs and commands instead of live profiler internals, and the main overlay header stays fixed while long mode bodies scroll.
+Mod attribution now carries confidence/origin data and keeps Harmony owner ids separate from patch assembly names.
+Overlay read access now exposes DTOs and commands instead of live profiler internals, hotkeys follow a semantic command policy while settings are open, and persisted overlay modes use stable ids.
 Recommendation thresholds now scale with the report window, terrain-shadow advice only appears when the setting is actually detected as enabled, and Ctrl+F11 report/bundle writing lives in the output layer.
-Cold-path cleanup now reuses drained metric buffers, early startup logs flush consistently after profiler registration, and stutter classification uses spike density over the report window instead of a single max frame alone.
 Session lifecycle resets now initialize correctly when the mod is reloaded inside an already loaded city, and long pauses reset memory-growth history instead of producing false leak spikes.</ChangeLog>
   <ExternalLink Type="github" Url="https://github.com/Theorist100/VanillaProfiler" />
 </Publish>

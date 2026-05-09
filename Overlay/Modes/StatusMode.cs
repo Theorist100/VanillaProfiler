@@ -70,7 +70,8 @@ namespace VanillaProfiler.Overlay.Modes
 
             string fromBottleneck = health.Bottleneck switch
             {
-                BottleneckKind.RenderBound => "graphics/rendering",
+                BottleneckKind.GpuBound => "GPU/present wait",
+                BottleneckKind.CpuRenderBound => "CPU rendering",
                 BottleneckKind.SimBound => "simulation",
                 BottleneckKind.MemoryBound => "managed memory growth",
                 BottleneckKind.Balanced => string.Empty,

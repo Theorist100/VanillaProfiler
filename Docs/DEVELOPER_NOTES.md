@@ -8,7 +8,7 @@ Practical notes for extending the profiler. Read [ARCHITECTURE.md](ARCHITECTURE.
 dotnet build VanillaProfiler.csproj --no-incremental
 ```
 
-Output deploys to `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Mods\VanillaProfiler\` automatically (csproj `ModsFolder` property). Restart the game to pick up changes — there is no hot-reload.
+Output deploys to `%LOCALAPPDATA%Low\Colossal Order\Cities Skylines II\Mods\VanillaProfiler\` automatically (csproj `ModsFolder` property). Restart the game to pick up changes — there is no hot-reload. Public release artifacts should not be copied from this live deploy folder; run `.\scripts\release-preflight.ps1` to build and stage from clean Release output.
 
 ## Adding a new metric
 
@@ -90,21 +90,21 @@ Everything else is **main-thread only**:
 - `RecordPatchedVanilla` from `SystemBase.Update` Postfix when `IProfilerPatchSurface.IsVanillaSystemPatched(type)` returns true — main thread
 - `MemorySampler`, `MemoryHistory`, `FpsSparkline`, `CityContext` — touched only from `OnFrame`/`Report`/ECS update on the main thread
 - `LastSnapshot` / `LastHealth` written by `Report` and read by overlay — both main thread
-- `OverlayState` (UI navigation: mode index, anchor) — written and read on the main thread by `ProfilerOverlay`
+- `OverlayState` (UI navigation: stable mode id, draw index, anchor) — written and read on the main thread by `ProfilerOverlay`
 
-Session lifecycle is centralized in `ProfilerSessionState`. Do not reset measurement fields directly from lifecycle callbacks; route load/unload/dispose through `Profiler.ResetForBoundary(SessionBoundary)` so metrics, public snapshots, memory history, recorder windows, graphics probes, replacement scans and city context reset together. `Mod.OnLoad` also calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` so hot-reload inside an already loaded city does not wait for a future load callback.
+Session lifecycle is centralized in `ProfilerSessionState`. Do not reset measurement fields directly from lifecycle callbacks; feed callbacks into `Initialize(GameMode)`, `BeginLoading(bool)` or `CompleteLoad(GameMode)` and let `Profiler` apply the returned `ProfilerLifecycleTransition`. Real load/unload boundaries route through `Profiler.ApplySessionBoundary(SessionBoundary)` so metrics, public snapshots, memory history, recorder windows, graphics probes, replacement scans and city context reset together. `Dispose()` is not a session boundary: it only shuts down sinks and disposes owned recorders. `Mod.OnLoad` also calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` so hot-reload inside an already loaded city does not wait for a future load callback.
 
 `SystemReplacementDetector.Scan()` returns a deduplicated `ReplacementSnapshot`. `Profiler` owns the currently published snapshot, refreshes it at lifecycle boundaries and at the start of every report cycle, and exposes `IsVanillaSystemPatched(Type)` on `IProfilerPatchSurface` for `SystemAutoProfiler`. Snapshot reads/writes use `Volatile.Read`/`Volatile.Write`; a hot-path reader sees either the previous full snapshot or the new full snapshot, never a half-populated scan.
 
 Lifecycle guard: `Profiler` carries a `volatile bool m_Disposed` checked at the top of every public entry point. After `Mod.OnDispose` runs `UnpatchAll → Unregister → Dispose`, any stale Harmony callback that captured a surface via `ProfilerHost.TryGetPatchSurface()` will no-op.
 
-`ProfilerHost.TryGetReadSurface()` and `ProfilerHost.TryGetPatchSurface()` each do a single `Volatile.Read`. Capture into a local before use: `var p = ProfilerHost.TryGetPatchSurface(); p?.OnSimTick();`. `ProfilerHost.IsAvailable` is a single-shot existence check (used by `CityContextSystem` to skip work when no profiler is alive); never pair it with a subsequent `TryGet*Surface()` in the same control flow — that re-introduces the Unregister race.
+`ProfilerHost.TryGetReadSurface()` and `ProfilerHost.TryGetPatchSurface()` each do a single `Volatile.Read`. Capture into a local before use: `var p = ProfilerHost.TryGetPatchSurface(); p?.OnSimTick();`. Do not do an existence check and then fetch the surface later in the same control flow; capture the surface once, then check lifecycle/read state on that captured instance.
 
 ## Testing locally
 
 There's no automated test harness. Validation flow:
 
-1. **Compile clean.** `dotnet build --no-incremental` must show 0 errors, 0 warnings.
+1. **Compile clean.** `dotnet build --no-incremental` must show 0 errors, 0 warnings. `.\scripts\check-local.ps1` runs the public clean build path; pass `-LocalAnalyzers` only on machines with the private local analyzer profile.
 2. **Load a small save.** Overlay should appear in Status mode within 5 seconds. All four indicators should be green after the first report.
 3. **Cycle modes (Ctrl+F9).** Status, Diagnosis, Tips, Details, Engine, and Hidden should render without overlap. Sparkline fills in within 60 s on Details. Engine should show non-zero CPU main / GPU frame time once a city is loaded.
 4. **Force a report (Ctrl+F10).** A new section should appear in `VanillaProfiler.log` immediately.
@@ -118,8 +118,8 @@ There's no automated test harness. Validation flow:
 
 - **First report is delayed.** `MemoryHistory` needs 5 samples (≈ 25 s) before it can declare a leak. Health shows OK during this window even if memory is rising.
 - **Bottleneck classifier averages over 5 s.** A single bad frame won't change the verdict. This is by design — flapping verdicts confuse players.
-- **Mod attribution falls back to assembly name** if the mod's `IMod` is in a separate assembly from its systems. Most mods have everything in one DLL, so this is rare.
-- **Settings panel uses fixed-size segmented controls.** Long mode names get cut off. The panel currently fits six modes (Status / Diag / Tips / Details / Engine / Hidden); a seventh mode would force widening the segmented buttons or rotating to a dropdown.
+- **Mod attribution carries confidence.** Hot-path fallback may show assembly-name or owner-id evidence until reflective startup/export paths can upgrade the cache through `IMod`.
+- **Settings panel uses fixed-size segmented controls.** Long mode names get cut off. The panel currently fits six modes (Status / Diag / Tips / Details / Engine / Hide); a seventh mode should add a new `OverlayModeId` and likely move the settings selector to a dropdown.
 
 ## Where to look first when debugging
 
@@ -128,7 +128,7 @@ There's no automated test harness. Validation flow:
 | No log file | `VanillaProfilerMod.Log` warning at mod load. Check Modding.log. |
 | Empty system tables | `SystemAutoProfiler.Prepare` returned false — `SystemBase.Update` not found. |
 | Overlay invisible | Mode is `Hidden` (cycle with Ctrl+F9), or `OnGUI` threw before `EnsureInitialized`. |
-| All systems labeled "Unknown" | `ModAttribution.GetTypes` threw — IMod scan failed. Check `ReflectionTypeLoadException`. |
+| All systems labeled "Unknown" | Attribution has only low/unknown evidence. Check `ReflectionTypeLoadException` warnings from the `IMod` scan and whether the mod splits systems into helper assemblies. |
 | Sparkline stays empty | `FpsSparkline.OnFrame` not getting called — verify `Rendering` phase patch active. |
 | Spike screenshots missing | Threshold too high, or `Logs/spikes/` not writable, or 30 s cooldown still active. |
 

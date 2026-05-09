@@ -31,7 +31,7 @@ namespace VanillaProfiler
         private readonly OverlayInputHandler m_Input = new();
         private readonly OverlayState m_State = new();
 
-        private IOverlayMode[] m_Modes = Array.Empty<IOverlayMode>();
+        private OverlayModeDescriptor[] m_Modes = Array.Empty<OverlayModeDescriptor>();
         private MainPanelButtons m_Buttons = null!;
 
         private PanelPositionController m_PanelPosition = null!;
@@ -41,15 +41,7 @@ namespace VanillaProfiler
 
         private void Start()
         {
-            m_Modes = new IOverlayMode[]
-            {
-                new StatusMode(),
-                new DiagnosisMode(),
-                new RecommendationsMode(),
-                new DetailsMode(),
-                new EngineMode(),
-                new HiddenMode(),
-            };
+            m_Modes = OverlayModeCatalog.CreateDefaultModes();
             m_Buttons = new MainPanelButtons(m_Theme, m_Modes, new MainPanelButtons.Actions
             {
                 OpenSettings = DoOpenSettings,
@@ -68,15 +60,6 @@ namespace VanillaProfiler
 
             LoadInitialSettings();
 
-            // Hotkeys and on-panel buttons share the same action methods so the two
-            // entry points cannot drift in behaviour.
-            m_Input.OnCycleMode += (s, e) => DoCycleMode();
-            m_Input.OnForceDump += (s, e) => DoForceDump();
-            m_Input.OnExportReport += (s, e) => DoExportReport();
-            m_Input.OnCyclePosition += (s, e) => DoCycleAnchor();
-            m_Input.OnToggleScreenshots += (s, e) => DoToggleScreenshots();
-            m_Input.OnToggleSettings += (s, e) => DoOpenSettings();
-
             // Apply has already committed the new settings to SettingsStore. DefaultMode is a
             // startup preference, so applying unrelated settings must not jump screens.
             m_Settings.OnApplied += (s, e) =>
@@ -89,7 +72,7 @@ namespace VanillaProfiler
         private void LoadInitialSettings()
         {
             var s = SettingsStore.Snapshot.Settings;
-            m_State.Initialize(s.DefaultMode, s.Anchor, m_Modes.Length);
+            m_State.Initialize(s.DefaultMode, s.Anchor, m_Modes);
             m_PanelPosition.Load();
         }
 
@@ -110,7 +93,7 @@ namespace VanillaProfiler
 
         private void Update()
         {
-            m_Input.Poll(m_Settings.IsOpen);
+            DispatchCommand(m_Input.Poll(m_Settings.IsOpen));
             m_Settings.SyncLiveSettings();
 
             // Debounced save: panel drags and corner snaps update SettingsStore
@@ -149,7 +132,7 @@ namespace VanillaProfiler
             var profiler = ProfilerHost.TryGetReadSurface();
             var snapshot = profiler?.LastSnapshot;
             var health = profiler?.LastHealth;
-            var mode = m_Modes[m_State.ModeIndex];
+            var mode = m_Modes[m_State.ModeIndex].Mode;
             var lifecycle = profiler?.LifecycleState ?? ProfilerLifecycleState.Initializing;
 
             // Render order = Z-order (last drawn = topmost):
@@ -162,10 +145,6 @@ namespace VanillaProfiler
             // and toast still render because the player may want to configure the mod
             // pre-game; they are not lifecycle-gated.
             //
-            // NoCity (main menu) intentionally renders nothing — DrawStandby was wired
-            // here briefly to address a "dead method" audit finding, but a badge in the
-            // main menu is intrusive for the common-case player who only wants to play.
-            // The standby badge stays defined for a future opt-in setting.
             if (lifecycle == ProfilerLifecycleState.Settling)
                 OverlayBadges.DrawSettling(m_Theme, scale);
             else if (lifecycle == ProfilerLifecycleState.Active && mode.IsHidden)
@@ -225,8 +204,14 @@ namespace VanillaProfiler
                 var viewport = new Rect(0f, MAIN_HEADER_HEIGHT, rect.width, viewportHeight);
                 var view = new Rect(0f, 0f, rect.width - 18f, contentHeight);
                 m_MainScroll = GUI.BeginScrollView(viewport, m_MainScroll, view, false, true);
-                DrawModeContent(profiler, snapshot, health, mode, settings, view.width, OverlayPanel.PAD);
-                GUI.EndScrollView();
+                try
+                {
+                    DrawModeContent(profiler, snapshot, health, mode, settings, view.width, OverlayPanel.PAD);
+                }
+                finally
+                {
+                    GUI.EndScrollView();
+                }
             }
             else
             {
@@ -283,18 +268,56 @@ namespace VanillaProfiler
             mode.Draw(ctx, snapshot, health);
         }
 
-        // Action methods — invoked by hotkeys (OverlayInputHandler events) and
-        // on-panel buttons. Single source of truth for each command.
+        // Action methods — invoked by semantic hotkey commands and on-panel buttons.
+        // Single source of truth for each command.
 
-        private void DoCycleMode() => SetModeIndex((m_State.ModeIndex + 1) % m_Modes.Length);
+        private void DispatchCommand(OverlayCommand command)
+        {
+            switch (command)
+            {
+                case OverlayCommand.None:
+                    return;
+                case OverlayCommand.ToggleSettings:
+                    DoOpenSettings();
+                    return;
+                case OverlayCommand.ToggleScreenshots:
+                    DoToggleScreenshots();
+                    return;
+                case OverlayCommand.CycleMode:
+                    DoCycleMode();
+                    return;
+                case OverlayCommand.ForceDump:
+                    DoForceDump();
+                    return;
+                case OverlayCommand.ExportReport:
+                    DoExportReport();
+                    return;
+                case OverlayCommand.CycleAnchor:
+                    DoCycleAnchor();
+                    return;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(command), command, "Unhandled overlay command");
+            }
+        }
+
+        private void DoCycleMode()
+        {
+            m_State.CycleMode(m_Modes);
+            OnModeChanged();
+        }
 
         private void SetModeIndex(int index)
         {
             int previousMode = m_State.ModeIndex;
-            m_State.SetMode(index, m_Modes.Length);
+            m_State.SetModeByIndex(index, m_Modes);
             if (m_State.ModeIndex == previousMode) return;
+            OnModeChanged();
+        }
+
+        private void OnModeChanged()
+        {
             m_MainScroll = Vector2.zero;
-            if (m_Modes[m_State.ModeIndex] is RecommendationsMode recommendationsMode)
+            if (m_Modes[m_State.ModeIndex].Mode is RecommendationsMode recommendationsMode)
             {
                 ProfilerHost.TryGetReadSurface()?.InvalidateRecommendationsCache();
                 recommendationsMode.InvalidateCache();
@@ -304,7 +327,7 @@ namespace VanillaProfiler
             // toast lasts ~3s, then the screen is truly clean as Emilithe asked.
             // We skip it when the pill is on — the pill already advertises the
             // hotkey, and a flashing toast on top of it is just noise.
-            if (m_Modes[m_State.ModeIndex] is HiddenMode && !SettingsStore.Snapshot.Settings.HideHintBadge)
+            if (m_State.ModeId == OverlayModeId.Hide && !SettingsStore.Snapshot.Settings.HideHintBadge)
                 m_Toast.Show("Profiler hidden — Ctrl+F9 to cycle, Ctrl+F8 settings");
         }
 
@@ -315,10 +338,19 @@ namespace VanillaProfiler
         private void DoExportReport()
         {
             ProfilerHost.TryGetReadSurface()?.ForceReport();
-            string? saved = ReportExporter.Export();
-            m_Toast.Show(saved != null
-                ? $"Support file created: {Path.GetFileName(saved)}"
-                : "Support file export failed");
+            var result = ReportExporter.Export();
+            m_Toast.Show(ExportToastText(result));
+        }
+
+        private static string ExportToastText(ExportResult result)
+        {
+            if (!result.ReportWritten)
+                return "Support file export failed";
+            if (result.ZipWritten && result.ZipWarnings.Count == 0)
+                return $"Support bundle created: {Path.GetFileName(result.ZipPath)}";
+            if (result.ZipWritten)
+                return $"Report + partial bundle created: {Path.GetFileName(result.ReportPath)}";
+            return $"Report created, bundle failed: {Path.GetFileName(result.ReportPath)}";
         }
 
         private void DoCycleAnchor()

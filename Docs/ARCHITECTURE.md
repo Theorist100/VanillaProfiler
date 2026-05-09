@@ -4,7 +4,7 @@
 
 - **Zero gameplay impact.** No entities created, no game state mutated. All measurement happens through Harmony patches and read-only ECS queries.
 - **Low overhead.** ~300 Stopwatch start/stop pairs per sim tick + four small queries every 5 seconds. Negligible compared to the systems being measured.
-- **Two audiences.** Status / Diagnosis modes for normal players (traffic-light health, leak detection, support-file export). Details mode + `VanillaProfiler.log` for mod authors and power users (per-system self main-thread cost, sync-point flagging, ECB.Playback timing, memory deltas).
+- **Two audiences.** Status / Diagnosis / Tips modes for normal players (traffic-light health, recommendations, leak detection, support-file export). Details / Engine modes + `VanillaProfiler.log` for mod authors and power users (per-system self main-thread cost, sync-point flagging, ECB.Playback timing, memory deltas, engine counters).
 
 ## Scope of measurement
 
@@ -16,8 +16,8 @@ Top per-system numbers (`SystemAutoProfiler` Stopwatch around `SystemBase.Update
 VanillaProfiler (assembly)
 ├── Mod.cs                      Entry point — loads settings, starts profiler, registers patches
 ├── Profiler.cs                 Main-thread coordinator. Implements IProfilerPatchSurface + IProfilerReadSurface; delegates timing to ReportScheduler and sink fan-out to ReportDispatcher.
-├── ProfilerSessionState.cs     Lifecycle/read-state owner; clears public snapshots on menu/loading/city boundaries.
-├── SessionBoundary.cs          Typed reset reasons used by Profiler.ResetForBoundary.
+├── ProfilerSessionState.cs     Token-based lifecycle/read-state owner; returns explicit transitions for Profiler to apply.
+├── SessionBoundary.cs          Typed active-session reset reasons used by Profiler.ApplySessionBoundary.
 ├── IProfilerSurfaces.cs        Two interfaces over the same Profiler instance:
 │                               • IProfilerPatchSurface — narrow surface for Harmony patches and ECS counter systems
 │                                 (OnFrame / OnSimTick / RecordSystem / RecordPatchedVanilla / RecordPhase)
@@ -54,11 +54,11 @@ VanillaProfiler (assembly)
                                ▼
                     ┌──────────────────────────────────────────┐
                     │  Profiler  (instance, held by ProfilerHost)│
-│  Patch entries (IProfilerPatchSurface):   │
-│   • IsVanillaSystemPatched                │
-│   • OnFrame, OnSimTick                    │
-│   • RecordSystem, RecordPatchedVanilla    │
-│   • RecordPhase                           │
+                    │  Patch entries (IProfilerPatchSurface):    │
+                    │   • IsVanillaSystemPatched                 │
+                    │   • OnFrame, OnSimTick                     │
+                    │   • RecordSystem, RecordPatchedVanilla     │
+                    │   • RecordPhase                            │
                     │  Delegates to:                            │
                     │   • ReportScheduler  (frame timing,       │
                     │                       report cadence)     │
@@ -93,7 +93,9 @@ VanillaProfiler (assembly)
 
 `IProfilerReadSurface` is a DTO/command boundary. It does not return live mutable services such as `MemoryHistory`, `FpsSparkline`, `SpikeScreenshot`, `GraphicsSettingsProbe`, or `RecommendationEngine`; consumers receive snapshots (`LatestMemoryHistory`, `GraphicsSettings`) or invoke narrow commands (`FpsSparklineText`, `BuildRecommendations`, `SetSpikeScreenshotsEnabled`, `InvalidateRecommendationsCache`).
 
-`ProfilerSessionState` is the single lifecycle/read-state source. `Mod.OnLoad` calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` immediately after registering the profiler, so hot-reloading the mod while a city is already active enters the same settling path as a normal load-complete callback. City load/unload, loading start and dispose all route through `Profiler.ResetForBoundary(SessionBoundary)`; that reset clears stale public snapshots, city context, graphics/replacement caches, spike screenshot state, memory history and the scheduler. `MemorySampler.ResetSession()` recreates Unity `ProfilerRecorder` instances at these boundaries so CPU/GPU timing windows do not bleed across menu/loading/previous-city samples.
+`ProfilerSessionState` is the single lifecycle/read-state source. It owns immutable `ProfilerSessionToken` values (`SessionId`, `LoadId`, `LifecycleState`) and returns `ProfilerLifecycleTransition` objects for initialization, load start, load completion and publish. `Mod.OnLoad` calls `Profiler.InitializeFromCurrentMode(GameManager.instance.gameMode)` immediately after registering the profiler, so hot-reloading the mod while a city is already active enters the same settling path as a normal load-complete callback. `Profiler` owns the effects for real session boundaries through `ApplySessionBoundary(SessionBoundary)`: metrics, public snapshots, city context, graphics/replacement caches, spike screenshot state, memory history, recorder windows and scheduler reset together. `Dispose()` is a separate shutdown path; it shuts down sinks and disposes `MemorySampler`, but it does not call `ApplySessionBoundary`, `MemorySampler.ResetSession()` or create a new report window.
+
+`ReportWindowContext` is the measurement/report boundary. Each window captures a `WindowId`, `ProfilerSettingsSnapshot`, `SyncPointThresholdTicks`, and `SystemReplacementDetector.ReplacementSnapshot`. Hot-path routing reads the active context through `Profiler.CurrentWindowContext`; `MetricsAggregator.StartWindow(context)` captures the same context and copies it onto the drained `MetricsSample`. `Profiler.Report()` drains and reports the old/current window, attaches replacements from `metrics.WindowContext`, then rotates to a freshly scanned context in `BeginNextWindow()` from a `finally` block. This prevents old metrics from being labelled with settings or Harmony state scanned after the window ended.
 
 ## Key contracts
 
@@ -113,31 +115,31 @@ Called from the **Rendering** phase Harmony patch (`UpdateSystemPatch`). One cal
 Runs after every `SystemBase.Update`. Does:
 
 - Pop the thread-local measurement stack and compute `selfTicks = inclusiveTicks - childSystemUpdateTicks`
-- Resolve `Type` → `(name, isVanilla, modName)` once via `ModAttribution.Resolve` (cached)
-- For vanilla types, query `IProfilerPatchSurface.IsVanillaSystemPatched(Type)` (O(1) lookup on the latest replacement snapshot, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime)
+- Resolve `Type` → `(name, isVanilla, modName)` once via `ModAttribution.ResolveIdentity` plus output-edge formatting (cached)
+- For vanilla types, query `IProfilerPatchSurface.IsVanillaSystemPatched(Type)` (O(1) lookup on the active `ReportWindowContext.Replacements`, not cached on `SystemInfo` because mod-options screens can flip Harmony patches at runtime and routing must stay tied to the current report window)
 - Route the elapsed delta:
   - **patched vanilla** → `Profiler.RecordPatchedVanilla` (independent of `ProfileVanillaSystems`; reports total/inclusive Update ms because the elapsed time blends mod prefix + vanilla original)
   - **plain vanilla** → `Profiler.RecordSystem` if `ProfileVanillaSystems = true`, else dropped
   - **mod system** → `Profiler.RecordSystem`
 
-`ModAttribution` decides ownership using:
+`ModAttribution` decides ownership as structured identity, not a display string:
 
-1. Namespace prefix (Game./Unity./Colossal. → Vanilla)
-2. Assembly scan for `IMod` implementer (the assembly name becomes the mod name)
-3. Fallback to assembly simple name
+1. Trusted game/Unity assembly origin plus a trusted namespace segment marks a vanilla ECS owner.
+2. Reflection over `IMod` implementers is allowed only on startup/export paths and can upgrade low-confidence cache entries.
+3. Hot-path fallback keeps assembly-name or unknown identity with confidence, so a helper assembly is not mistaken for a confirmed mod owner.
 
-The result is cached per type. Cold-path scan happens once per type discovered; subsequent calls are dictionary lookups.
+The result is cached per type and assembly. Low-confidence cache entries can be upgraded, but trusted/profiler identities are not downgraded.
 
 ### `SystemReplacementDetector`
 
-Walks `World.All`, looking for vanilla systems whose `OnUpdate` has a foreign Harmony prefix. It deduplicates by system `Type` because the same system can appear in multiple worlds, then returns a `ReplacementSnapshot`.
+Walks `World.All`, looking for vanilla systems whose `OnUpdate` has a foreign Harmony patch. Prefixes, postfixes, transpilers and finalizers all count as replacement evidence. It deduplicates by system `Type` because the same system can appear in multiple worlds, then returns a `ReplacementSnapshot`.
 
 - **`ReplacementSnapshot.IsPatched(Type)`** — O(1) dictionary probe used by `Profiler.IsVanillaSystemPatched`, which is exposed on the patch surface for `SystemAutoProfiler`.
-- **`ReplacementSnapshot.Replacements`** — sorted, deduplicated rows consumed by `Profiler.Report` to build `OverlaySnapshot.ReplacedVanillaSystems`. The rows are matched with `MetricsSample.PatchedVanillaSystems` by full type name, so each row carries `(VanillaSystem, OwnerMod, TotalMs)`.
+- **`ReplacementSnapshot.Replacements`** — sorted, deduplicated rows consumed by `Profiler.Report` to build `OverlaySnapshot.ReplacedVanillaSystems`. The rows are matched with `MetricsSample.PatchedVanillaSystems` by full type name, so each row carries the vanilla system name, structured patch-owner evidence, and total Update ms.
 
-`Profiler` owns the currently published snapshot. Lifecycle boundaries (`InitializeFromCurrentMode`, `BeginLoading(true)`, `SetGameLoaded(true/false)`) reset and refresh it, and each report cycle scans at the beginning before `MetricsAggregator.Drain()`. `Profiler.IsVanillaSystemPatched(Type)` uses `Volatile.Read` and `RefreshReplacementSnapshot()` publishes with `Volatile.Write`, so a hot-path reader sees either the previous full snapshot or the new full snapshot, never a partially-built scan result.
+`Profiler` owns the active replacement snapshot as part of the active `ReportWindowContext`. Lifecycle boundaries discard the current partial window and immediately publish a fresh context. Normal report cadence drains the current metrics with their original context, writes the report, then scans and publishes the next context. `Profiler.IsVanillaSystemPatched(Type)` therefore routes a system using the same replacement snapshot that will later be attached to that window's report.
 
-Why a separate bucket: a Harmony prefix can wrap or skip the original `OnUpdate`, so the elapsed time inside the patched `SystemBase.Update` is a blend of mod-prefix work and (possibly skipped) vanilla original. There is no Harmony hook between prefix and original to capture an intermediate timestamp. Surfacing the total `Update` ms is honest — the split is what's not measurable, not the cost itself.
+Why a separate bucket: Harmony prefixes can wrap or skip the original `OnUpdate`, and postfixes, transpilers, or finalizers can still add work or change behaviour. The elapsed time inside the patched `SystemBase.Update` is a blend of patching-mod work and the vanilla original. There is no Harmony hook boundary that gives VanillaProfiler a reliable split. Surfacing the total `Update` ms is honest — the split is what's not measurable, not the cost itself.
 
 ### `MemoryHistory`
 
@@ -152,7 +154,7 @@ Pure function: `(snapshot, memoryHistory, simPhaseMs, renderPhaseMs) → HealthR
 `Classify()` returns:
 - Per-metric levels (FPS, stutter, memory, managed growth) — fed to the overlay traffic light
 - Overall level — worst of the four
-- Bottleneck verdict (RENDER / SIM / MEMORY / BALANCED) with a one-line hint
+- Bottleneck verdict (`GpuBound`, `CpuRenderBound`, `SimBound`, `MemoryBound`, `Balanced`, `Unknown`) with a one-line hint
 
 The bottleneck logic uses **average phase ms per call** — derived from exact phase-key lookups for `UpdateSystem.GameSimulation` and `UpdateSystem.Rendering`.
 
@@ -170,7 +172,7 @@ Cold-path fan-out to `IReportSink[]`. Wraps each sink in its own `try/catch` so 
 
 ### `OverlayState`
 
-Mutable UI navigation state (`ModeIndex`, `Anchor`) lifted out of `ProfilerOverlay` so drawing, persistence, and navigation each have a single home. `ProfilerOverlay` owns the instance, holds it for the session, and routes hotkey/button events to `SetMode` / `SetAnchor` / `CycleMode` / `CycleAnchor`.
+Mutable UI navigation state (`ModeId`, `ModeIndex`, `Anchor`) lifted out of `ProfilerOverlay` so drawing, persistence, and navigation each have a single home. Persisted default mode values are interpreted through `OverlayModeCatalog` as stable `OverlayModeId` values, while the current array index is only a draw-order lookup. `ProfilerOverlay` owns the instance, holds it for the session, and routes semantic `OverlayCommand` values plus button clicks to `SetMode` / `SetAnchor` / `CycleMode` / `CycleAnchor`.
 
 The main overlay header is drawn outside the scroll view, so long Details/Engine/Recommendations bodies scroll under a stable title/drag band. Reset Defaults writes `PanelX = -1` / `PanelY = -1`; `ProfilerOverlay.ApplyLiveSettings()` reloads panel positioning so the next layout returns to the selected anchor preset instead of preserving a stale manual drag.
 
@@ -195,7 +197,7 @@ Shared text-section builders used by both the periodic `Output/LogFileSink` writ
 | `EntityCommandBufferPatch.PlaybackEntityManager` | `EntityCommandBuffer.Playback(EntityManager)` | ECB playback time, surfaced as `ECB.Playback` phase |
 | `EntityCommandBufferPatch.PlaybackExclusiveTransaction` | `EntityCommandBuffer.Playback(ExclusiveEntityTransaction)` | Same, alternate overload (gated when missing on the build) |
 
-`HarmonyConflictDetector` runs once after the first report (deferred to give other mods time to apply their patches). It enumerates `Harmony.GetAllPatchedMethods()` and lists methods patched by more than one owner only when VanillaProfiler is one of those owners. The result goes to `VanillaProfiler.log` as a one-off section.
+`HarmonyConflictDetector` computes a stable signature from `Harmony.GetAllPatchedMethods()` and owner ids each report cycle. It logs only when that signature changes, and the visible conflict list is limited to multi-owner patches where VanillaProfiler is one of the owners. The result goes to `VanillaProfiler.log`.
 
 ## Threading model
 
@@ -211,18 +213,18 @@ The mod follows a **main-thread measurement** rule rather than scattering locks 
   - `RecordPatchedVanilla` is called from `SystemBase.Update` Postfix when `IProfilerPatchSurface.IsVanillaSystemPatched(type)` returns true — main thread.
   - `ReportScheduler`, `MemorySampler`, `MemoryHistory`, `FpsSparkline` are touched only from `OnFrame`/`Report` and lifecycle boundary resets.
   - `LastSnapshot` and `LastHealth` are written by `Report` and read by `ProfilerOverlay.OnGUI` — both main thread.
-  - `OverlayState` (mode index, anchor) is written and read by `ProfilerOverlay` only — main thread.
+  - `OverlayState` (stable mode id, draw index, anchor) is written and read by `ProfilerOverlay` only — main thread.
 - **Disposal** is guarded by a `volatile bool m_Disposed`. Every public entry point checks it first so a stale Harmony callback landing after `Mod.OnDispose` no-ops cleanly.
 - **Log output has its own lock.** `LogFileSink` serializes file IO because system messages can be routed from defensive off-thread diagnostics.
 - **`ReportDispatcher`** is invoked only from `Profiler.Report` and `Profiler.WriteSystem`, both main-thread; per-sink `try/catch` makes one bad sink isolated rather than fatal.
-- **`ProfilerHost.TryGetReadSurface()` / `TryGetPatchSurface()`** each do a single `Volatile.Read`. Callers must capture the result into a local variable before use. `ProfilerHost.IsAvailable` is a single-shot existence gate (used by `CityContextSystem` to skip work when no profiler is alive); never pair it with a subsequent `TryGet*Surface()` in the same control flow — that's a TOCTOU race.
+- **`ProfilerHost.TryGetReadSurface()` / `TryGetPatchSurface()`** each do a single `Volatile.Read`. Callers must capture the result into a local variable before use, then make lifecycle/read-state decisions on that captured surface. `CityContextSystem` follows this pattern before running entity-count queries.
 
 ## What this mod intentionally does NOT do
 
 - **No persistence beyond settings.** Nothing serialised in saves. Sessions are independent.
 - **No structural ECS changes.** Only read-only `EntityQuery.CalculateEntityCount()`. Patches use prefix/postfix, plus a narrow finalizer only where needed to close `ProfilerMarker` scopes on thrown `SystemBase.Update()`.
 - **No UI Toolkit / Coherent UI.** IMGUI is sufficient and avoids the layering complexity of CS2's binding system.
-- **No quality recommendations beyond bottleneck hint.** "Render-bound, lower graphics" is generic enough; finer advice would be guesswork.
+- **Recommendations are bounded by measured evidence.** Tips may suggest graphics or isolation steps when counters/settings support them, but the mod does not guess at unmeasured engine internals or per-job worker costs.
 - **No per-job worker-thread profiling.** Burst-compiled jobs run as native code outside `SystemBase.Update()`; their per-system cost cannot be observed from a mod in a release build. Unity Profiler with engine-level instrumentation is the only tool that can. We surface aggregate worker time when the `ProfilerCategory.Internal` markers are exposed (usually stripped in release — silently zero when missing).
 
 ## See also
