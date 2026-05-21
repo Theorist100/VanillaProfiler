@@ -110,6 +110,13 @@ namespace VanillaProfiler
             int patchCount = m_Harmony.GetPatchedMethods()
                 .Count(method => Harmony.GetPatchInfo(method)?.Owners?.Contains(HARMONY_ID) == true);
             ModLog.Info($"Harmony patches applied: {patchCount}");
+
+            UpdateSystemPatch.VerifyAndReport();
+            SystemAutoProfiler.VerifyAndReport();
+            EntityCommandBufferPatch.VerifyAndReport();
+
+            if (PatchStatusTracker.HasFailures)
+                ModLog.Warn(PatchStatusTracker.DetailedSummary);
         }
 
         private void CreateOverlay()
@@ -156,6 +163,7 @@ namespace VanillaProfiler
             });
             TryCleanup("reset attribution", ModAttribution.Reset);
             TryCleanup("reset auto-profiler", SystemAutoProfiler.Reset);
+            TryCleanup("reset patch status", PatchStatusTracker.Clear);
             TryCleanup("reset replacement detector", SystemReplacementDetector.Reset);
             TryCleanup("reset harmony conflict detector", HarmonyConflictDetector.Reset);
             TryCleanup("reset city context", CityContext.Reset);

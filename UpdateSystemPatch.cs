@@ -64,7 +64,9 @@ namespace VanillaProfiler
             [HarmonyPrefix]
             public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Begin();
+                __state = default;
+                try { __state = Begin(); }
+                catch { /* profiler — never crash game */ }
             }
 
             [HarmonyPostfix]
@@ -99,7 +101,9 @@ namespace VanillaProfiler
             [HarmonyPrefix]
             public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Begin();
+                __state = default;
+                try { __state = Begin(); }
+                catch { /* profiler — never crash game */ }
             }
 
             [HarmonyPostfix]
@@ -146,6 +150,37 @@ namespace VanillaProfiler
                     profiler.OnFrame();
             }
             catch { /* profiler — never crash game */ }
+        }
+
+        public static void VerifyAndReport()
+        {
+            VerifyPatch(
+                "UpdateSystemPatch.UpdatePhase",
+                AccessTools.Method(typeof(UpdateSystem), nameof(UpdateSystem.Update), new[] { typeof(SystemUpdatePhase) }),
+                typeof(UpdatePhase));
+            VerifyPatch(
+                "UpdateSystemPatch.UpdatePhaseWithIndex",
+                AccessTools.Method(typeof(UpdateSystem), nameof(UpdateSystem.Update), new[] { typeof(SystemUpdatePhase), typeof(uint), typeof(int) }),
+                typeof(UpdatePhaseWithIndex));
+        }
+
+        private static void VerifyPatch(string patchName, System.Reflection.MethodInfo? method, Type patchType)
+        {
+            if (method == null)
+            {
+                PatchStatusTracker.ReportFailure(patchName, "target method not found");
+                return;
+            }
+
+            var patchInfo = Harmony.GetPatchInfo(method);
+            bool hasPostfix = patchInfo?.Postfixes.Any(patch =>
+                string.Equals(patch.owner, VanillaProfilerMod.HARMONY_ID, StringComparison.Ordinal)
+                && patch.PatchMethod.DeclaringType == patchType) == true;
+
+            if (hasPostfix)
+                PatchStatusTracker.ReportSuccess(patchName);
+            else
+                PatchStatusTracker.ReportFailure(patchName, "postfix not present after PatchAll");
         }
     }
 }

@@ -152,7 +152,9 @@ namespace VanillaProfiler
             // and toast still render because the player may want to configure the mod
             // pre-game; they are not lifecycle-gated.
             //
-            if (lifecycle == ProfilerLifecycleState.Settling)
+            if (ProfilerHost.HasMissingPatches)
+                OverlayBadges.DrawPatchWarning(m_Theme, scale, ProfilerHost.PatchStatusMessage);
+            else if (lifecycle == ProfilerLifecycleState.Settling)
                 OverlayBadges.DrawSettling(m_Theme, scale);
             else if (lifecycle == ProfilerLifecycleState.Active && mode.IsHidden)
             {

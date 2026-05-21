@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using HarmonyLib;
 using Unity.Entities;
@@ -75,9 +76,14 @@ namespace VanillaProfiler
         [HarmonyPrefix]
         public static void Prefix(out SystemUpdateMeasurement __state)
         {
-            var stack = s_CallStack ??= new List<CallFrame>(32);
-            __state = Begin(stack.Count);
-            stack.Add(default);
+            __state = default;
+            try
+            {
+                var stack = s_CallStack ??= new List<CallFrame>(32);
+                __state = Begin(stack.Count);
+                stack.Add(default);
+            }
+            catch { /* profiler — never crash game */ }
         }
 
         [HarmonyPostfix]
@@ -194,6 +200,29 @@ namespace VanillaProfiler
                     identity.IsVanillaSystemOwner,
                     ModAttribution.FormatIdentity(identity)),
             };
+        }
+
+        public static void VerifyAndReport()
+        {
+            var method = AccessTools.Method(typeof(SystemBase), nameof(SystemBase.Update));
+            if (method == null)
+            {
+                PatchStatusTracker.ReportFailure(nameof(SystemAutoProfiler), "SystemBase.Update method not found");
+                return;
+            }
+
+            var patchInfo = Harmony.GetPatchInfo(method);
+            bool hasPrefix = patchInfo?.Prefixes.Any(patch =>
+                string.Equals(patch.owner, VanillaProfilerMod.HARMONY_ID, StringComparison.Ordinal)
+                && patch.PatchMethod.DeclaringType == typeof(SystemAutoProfiler)) == true;
+            bool hasPostfix = patchInfo?.Postfixes.Any(patch =>
+                string.Equals(patch.owner, VanillaProfilerMod.HARMONY_ID, StringComparison.Ordinal)
+                && patch.PatchMethod.DeclaringType == typeof(SystemAutoProfiler)) == true;
+
+            if (hasPrefix && hasPostfix)
+                PatchStatusTracker.ReportSuccess(nameof(SystemAutoProfiler));
+            else
+                PatchStatusTracker.ReportFailure(nameof(SystemAutoProfiler), "prefix/postfix not present after PatchAll");
         }
     }
 }

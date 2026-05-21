@@ -1,4 +1,5 @@
 using UnityEngine;
+using VanillaProfiler.Diagnostics;
 
 namespace VanillaProfiler.Overlay
 {
@@ -25,6 +26,11 @@ namespace VanillaProfiler.Overlay
             DrawBadge(theme, scale,
                 "Profiler settling — first report in a few seconds…",
                 theme.BodyStyle);
+        }
+
+        public static void DrawPatchWarning(OverlayTheme theme, float scale, string text)
+        {
+            DrawBadge(theme, scale, text, theme.StyleForHealth(HealthLevel.Poor));
         }
 
         private static void DrawBadge(OverlayTheme theme, float scale, string text, GUIStyle style)

@@ -30,6 +30,10 @@ namespace VanillaProfiler
         /// </summary>
         public static bool IsAvailable => Volatile.Read(ref s_Current) != null;
 
+        public static bool HasMissingPatches => PatchStatusTracker.HasFailures;
+
+        public static string PatchStatusMessage => PatchStatusTracker.Summary;
+
         public static void Register(Profiler profiler)
         {
             if (profiler == null) throw new ArgumentNullException(nameof(profiler));

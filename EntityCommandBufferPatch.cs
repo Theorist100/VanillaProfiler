@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using HarmonyLib;
 using Unity.Entities;
@@ -46,7 +47,9 @@ namespace VanillaProfiler
             [HarmonyPrefix]
             public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Begin();
+                __state = default;
+                try { __state = Begin(); }
+                catch { /* profiler — never crash game */ }
             }
 
             [HarmonyPostfix]
@@ -83,7 +86,9 @@ namespace VanillaProfiler
             [HarmonyPrefix]
             public static void Prefix(out PatchTimingMeasurement __state)
             {
-                __state = Begin();
+                __state = default;
+                try { __state = Begin(); }
+                catch { /* profiler — never crash game */ }
             }
 
             [HarmonyPostfix]
@@ -122,6 +127,51 @@ namespace VanillaProfiler
                     Stopwatch.GetTimestamp() - measurement.StartTicks));
             }
             catch { /* profiler — never crash game */ }
+        }
+
+        public static void VerifyAndReport()
+        {
+            VerifyRequiredPatch();
+            VerifyOptionalExclusiveTransactionPatch();
+        }
+
+        private static void VerifyRequiredPatch()
+        {
+            var method = AccessTools.Method(typeof(EntityCommandBuffer),
+                nameof(EntityCommandBuffer.Playback), new[] { typeof(EntityManager) });
+            if (method == null)
+            {
+                PatchStatusTracker.ReportFailure("EntityCommandBufferPatch.PlaybackEntityManager", "target method not found");
+                return;
+            }
+
+            VerifyPatch("EntityCommandBufferPatch.PlaybackEntityManager", method, typeof(PlaybackEntityManager));
+        }
+
+        private static void VerifyOptionalExclusiveTransactionPatch()
+        {
+            var method = AccessTools.Method(typeof(EntityCommandBuffer),
+                nameof(EntityCommandBuffer.Playback), new[] { typeof(ExclusiveEntityTransaction) });
+            if (method == null)
+            {
+                PatchStatusTracker.ReportSuccess("EntityCommandBufferPatch.PlaybackExclusiveTransaction");
+                return;
+            }
+
+            VerifyPatch("EntityCommandBufferPatch.PlaybackExclusiveTransaction", method, typeof(PlaybackExclusiveTransaction));
+        }
+
+        private static void VerifyPatch(string patchName, System.Reflection.MethodInfo method, Type patchType)
+        {
+            var patchInfo = Harmony.GetPatchInfo(method);
+            bool hasPostfix = patchInfo?.Postfixes.Any(patch =>
+                string.Equals(patch.owner, VanillaProfilerMod.HARMONY_ID, StringComparison.Ordinal)
+                && patch.PatchMethod.DeclaringType == patchType) == true;
+
+            if (hasPostfix)
+                PatchStatusTracker.ReportSuccess(patchName);
+            else
+                PatchStatusTracker.ReportFailure(patchName, "postfix not present after PatchAll");
         }
     }
 }
