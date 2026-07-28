@@ -37,6 +37,13 @@ namespace VanillaProfiler.Output
         // after an IO failure must NOT truncate — that would erase the current run.
         private bool m_TruncateOnNextOpen = true;
 
+        // Gate WriteText against accidental lazy file creation before Initialize().
+        // Profiler defers Initialize() until first GameLoaded transition so the log
+        // file is never created in main menu. Without this flag a WriteSystemMessage
+        // call from early bootstrap would TryOpenWriter and silently truncate the
+        // previous session's log on every cold boot to menu.
+        private bool m_Initialized;
+
         public LogFileSink(string logDir)
         {
             m_LogDir = logDir;
@@ -47,6 +54,7 @@ namespace VanillaProfiler.Output
             lock (m_WriteLock)
             {
                 m_Shutdown = false;
+                m_Initialized = true;
                 _ = TryOpenWriter();
             }
         }
@@ -69,6 +77,7 @@ namespace VanillaProfiler.Output
             lock (m_WriteLock)
             {
                 m_Shutdown = true;
+                m_Initialized = false;
                 try { CloseWriter(); }
                 catch { }
             }
@@ -100,6 +109,9 @@ namespace VanillaProfiler.Output
         private void WriteText(string text, bool flush)
         {
             if (m_Shutdown) return;
+            // Drop writes before Initialize() so we never lazy-open the file in
+            // main menu. Profiler calls Initialize() on first GameLoaded boundary.
+            if (!m_Initialized) return;
             try
             {
                 if (m_Writer == null && DateTime.UtcNow < m_NextOpenRetryUtc)
