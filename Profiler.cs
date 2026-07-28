@@ -48,6 +48,12 @@ namespace VanillaProfiler
         // Defensive stale-reference guard for callbacks after OnDispose.
         private volatile bool m_Disposed;
 
+        // Dispatcher (and the underlying log file) initialized lazily on the
+        // first GameLoaded transition so VanillaProfiler.log is NOT truncated /
+        // created when the mod boots in main menu. Idempotent: only the first
+        // GameLoaded fires Initialize; subsequent transitions are no-op.
+        private bool m_DispatcherInitialized;
+
         public OverlaySnapshot? LastSnapshot => m_Session.LastSnapshot;
         public HealthReport? LastHealth => m_Session.LastHealth;
         private MemoryHistory MemoryHistory { get; }
@@ -99,7 +105,9 @@ namespace VanillaProfiler
             m_Dispatcher = new ReportDispatcher(sinks);
             m_ReportPipeline = new ProfilerReportPipeline(m_Dispatcher, this);
             m_Scheduler.Reset();
-            m_Dispatcher.Initialize();
+            // m_Dispatcher.Initialize() deferred to first GameLoaded transition
+            // via EnsureDispatcherInitialized(). Prevents log file creation in
+            // main menu — file is opened only when a real city session starts.
         }
 
         public void Dispose()
@@ -312,7 +320,15 @@ namespace VanillaProfiler
 
         private void PrepareLoadedGameSession()
         {
+            EnsureDispatcherInitialized();
             MemoryHistory.SuppressNextReports(5);
+        }
+
+        private void EnsureDispatcherInitialized()
+        {
+            if (m_DispatcherInitialized) return;
+            m_Dispatcher.Initialize();
+            m_DispatcherInitialized = true;
         }
 
         private void BeginNextWindow()
